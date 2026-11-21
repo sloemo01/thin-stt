@@ -20,8 +20,7 @@ if (-not $py) { throw "Python not found. Install Python 3.10-3.12 from https://p
 
 Write-Host "Creating venv + installing deps (first run downloads ~300MB)..."
 & $py.Source -m venv "$app\.venv"
-& "$app\.venv\Scripts\pip.exe" install --quiet --upgrade pip
-& "$app\.venv\Scripts\pip.exe" install --quiet -r "$app\requirements.txt"
+& "$app\.venv\Scripts\python.exe" -m pip install --quiet -r "$app\requirements.txt"
 
 # desktop + start-menu shortcut
 $ws = New-Object -ComObject WScript.Shell
