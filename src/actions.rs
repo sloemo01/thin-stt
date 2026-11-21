@@ -193,10 +193,11 @@ fn notify_macos(title: &str, body: &str) {
         body.replace('"', "\\\""),
         title.replace('"', "\\\"")
     );
+    // output() waits for osascript to exit — spawn() would leave a zombie.
     let _ = std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
-        .spawn();
+        .output();
 }
 
 /// Remove every downloaded model + stray files. Returns bytes freed.
@@ -258,6 +259,11 @@ pub fn cleanup_partial() -> u64 {
             } else {
                 true // unknown folder
             };
+            // A second process may be mid-download into one of these dirs —
+            // skip anything touched in the last 10 minutes.
+            if remove && is_fresh(&path) {
+                continue;
+            }
             if remove {
                 freed += dir_size(&path);
                 if path.is_dir() {
@@ -269,6 +275,31 @@ pub fn cleanup_partial() -> u64 {
         }
     }
     freed
+}
+
+/// True when the file (or anything inside the dir) was modified in the last
+/// 10 minutes — signals another process is still writing it.
+fn is_fresh(path: &std::path::Path) -> bool {
+    let cutoff = std::time::Duration::from_secs(600);
+    let now = std::time::SystemTime::now();
+    fn newest(path: &std::path::Path) -> Option<std::time::SystemTime> {
+        let mut n = std::fs::metadata(path).ok()?.modified().ok();
+        if path.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for e in entries.flatten() {
+                    let en = newest(&e.path());
+                    if en > n {
+                        n = en;
+                    }
+                }
+            }
+        }
+        n
+    }
+    newest(path)
+        .and_then(|t| now.duration_since(t).ok())
+        .map(|age| age < cutoff)
+        .unwrap_or(false)
 }
 
 fn has_part(dir: &std::path::Path) -> bool {
