@@ -14,15 +14,17 @@ pub fn insert_text(text: &str, mode: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    // Always seed the clipboard (so "paste" works and "type" has a fallback).
-    {
-        let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
-        cb.set_text(text.to_string()).map_err(|e| e.to_string())?;
-    }
-
     match mode {
-        "clipboard" => Ok(()),
+        "clipboard" => {
+            let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
+            cb.set_text(text.to_string()).map_err(|e| e.to_string())
+        }
         "paste" => {
+            let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
+            // Save the user's clipboard and restore it after the paste so
+            // dictation doesn't eat whatever they had copied.
+            let prev = cb.get_text().ok();
+            cb.set_text(text.to_string()).map_err(|e| e.to_string())?;
             let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
             thread::sleep(Duration::from_millis(150)); // clipboard settle
             enigo
@@ -34,10 +36,15 @@ pub fn insert_text(text: &str, mode: &str) -> Result<(), String> {
             enigo
                 .key(Key::Meta, Direction::Release)
                 .map_err(|e| e.to_string())?;
+            // Let the target app consume the paste before restoring.
+            thread::sleep(Duration::from_millis(400));
+            if let Some(prev) = prev {
+                let _ = cb.set_text(prev);
+            }
             Ok(())
         }
         _ => {
-            // "type" — synthesize keystrokes
+            // "type" — synthesize keystrokes; clipboard is left untouched.
             let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
             enigo.text(text).map_err(|e| e.to_string())
         }

@@ -6647,7 +6647,6 @@ dependencies = [
  "futures",
  "global-hotkey",
  "gpui",
- "hound",
  "image",
  "log",
  "macos-accessibility-client",

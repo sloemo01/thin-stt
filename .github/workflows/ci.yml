@@ -1,0 +1,19 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # gpui's build script compiles Metal shaders — Xcode 26+ moved the
+      # Metal toolchain into a downloadable component.
+      - name: Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain || true
+      - name: cargo check
+        run: cargo check

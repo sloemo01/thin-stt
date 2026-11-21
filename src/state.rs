@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
-use crate::{audio::Recorder, config, config::Config, engine::Engine};
+use crate::{config, config::Config, engine::Engine};
 
 /// Events posted from background threads to the UI pump on the main thread.
 pub enum UiEvent {
@@ -20,7 +20,7 @@ pub enum UiEvent {
 
 pub struct AppState {
     pub cfg: Mutex<Config>,
-    pub recorder: Mutex<Option<Recorder>>,
+
     pub engine: Mutex<Engine>,
     /// global-hotkey shortcut id -> model_id
     pub hotkeys: Mutex<HashMap<u32, String>>,
@@ -43,7 +43,6 @@ pub fn state() -> &'static Arc<AppState> {
     S.get_or_init(|| {
         Arc::new(AppState {
             cfg: Mutex::new(config::load()),
-            recorder: Mutex::new(None),
             engine: Mutex::new(Engine::new()),
             hotkeys: Mutex::new(HashMap::new()),
             registered: Mutex::new(HashMap::new()),

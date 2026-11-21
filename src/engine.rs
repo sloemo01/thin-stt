@@ -19,19 +19,34 @@ impl Engine {
         }
     }
 
+    /// Load the model now if downloaded, so the first dictation doesn't
+    /// pay the load after key release. No-op when absent or already warm.
+    pub fn preload(&mut self, model_id: &str) {
+        let downloaded = models::by_id(model_id).map_or(false, models::is_downloaded);
+        if downloaded && !self.loaded.contains_key(model_id) {
+            if let Ok(m) = load_model(model_id) {
+                self.loaded.insert(model_id.to_string(), m);
+            }
+        }
+    }
+
     /// Transcribe 16kHz mono f32 samples with the given model id.
     /// Loads the model on first use and keeps it warm.
     pub fn transcribe(&mut self, model_id: &str, samples: &[f32]) -> Result<String, String> {
-        if !self.loaded.contains_key(model_id) {
-            let model = load_model(model_id)?;
-            self.loaded.insert(model_id.to_string(), model);
-        }
+        self.preload(model_id);
         let model = self
             .loaded
             .get_mut(model_id)
             .ok_or_else(|| "model not loaded".to_string())?;
+        // Pin the language: auto-detect on short clips mis-fires badly
+        // (English speech comes back as Welsh/German). Single-language
+        // engines ignore the hint.
+        let opts = TranscribeOptions {
+            language: Some("en".into()),
+            ..Default::default()
+        };
         let result = model
-            .transcribe(samples, &TranscribeOptions::default())
+            .transcribe(samples, &opts)
             .map_err(|e| format!("{:?}", e))?;
         Ok(result.text.trim().to_string())
     }

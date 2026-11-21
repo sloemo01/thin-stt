@@ -1,19 +1,17 @@
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 /// Active microphone capture. Samples are accumulated as f32 mono at the
-/// device's native rate; `stop` resamples to 16 kHz and writes a WAV file.
+/// device's native rate; `stop` resamples to 16 kHz.
+///
+/// cpal's CoreAudio stream is !Send — the Recorder must live on one thread.
+/// The pump owns it: start/stop/drop all happen on the main thread.
 pub struct Recorder {
     stream: Mutex<Option<cpal::Stream>>,
     samples: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
 }
-
-// cpal's CoreAudio stream is !Send. Access is Mutex-guarded and the stream is
-// only touched from the main thread + one worker at a time.
-unsafe impl Send for Recorder {}
 
 fn downmix(data: &[f32], channels: usize) -> Vec<f32> {
     if channels <= 1 {
@@ -124,34 +122,15 @@ impl Recorder {
         })
     }
 
-    /// Stop recording, write the WAV, return 16kHz mono f32 samples.
-    pub fn stop(&self, wav_path: &Path) -> Vec<f32> {
+    /// Stop recording and return 16kHz mono f32 samples. Nothing is
+    /// persisted — dictated audio never touches disk.
+    pub fn stop(&self) -> Vec<f32> {
         if let Some(stream) = self.stream.lock().unwrap().take() {
             let _ = stream.pause();
             drop(stream);
         }
         let raw = std::mem::take(&mut *self.samples.lock().unwrap());
-        let samples = resample(&raw, self.sample_rate, 16000);
-
-        if let Some(dir) = wav_path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(mut w) = hound::WavWriter::create(
-            wav_path,
-            hound::WavSpec {
-                channels: 1,
-                sample_rate: 16000,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            },
-        ) {
-            for s in &samples {
-                let v = (s * 32767.0).clamp(-32768.0, 32767.0) as i16;
-                let _ = w.write_sample(v);
-            }
-            let _ = w.finalize();
-        }
-        samples
+        resample(&raw, self.sample_rate, 16000)
     }
 }
 

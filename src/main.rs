@@ -10,7 +10,7 @@ mod typer;
 mod ui;
 
 use std::sync::mpsc::Receiver;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use gpui::*;
 use objc::{msg_send, sel, sel_impl};
@@ -50,6 +50,16 @@ fn main() {
             ));
         }
         actions::fetch_remote_sizes();
+        actions::sweep_recordings();
+        // Warm the engines for any model with a hotkey so the first
+        // dictation doesn't pay the model load after key release.
+        std::thread::spawn(|| {
+            let ids: Vec<String> = state().cfg.lock().unwrap().hotkeys.keys().cloned().collect();
+            let mut eng = state().engine.lock().unwrap();
+            for id in ids {
+                eng.preload(&id);
+            }
+        });
         setup_tray();
         open_main_window(cx);
 
@@ -214,9 +224,9 @@ fn main_view(cx: &mut App, f: impl FnOnce(&mut ThinSttView, &mut Context<ThinStt
     }
 }
 
-fn hotkey_pressed(id: u32) {
+fn hotkey_pressed(id: u32, recorder: &mut Option<audio::Recorder>) {
     let s = state();
-    if s.recorder.lock().unwrap().is_some() {
+    if recorder.is_some() {
         return;
     }
     let model_id = match s.hotkeys.lock().unwrap().get(&id) {
@@ -234,7 +244,7 @@ fn hotkey_pressed(id: u32) {
     let mic = s.cfg.lock().unwrap().mic_device.clone();
     match audio::Recorder::start(mic.as_deref()) {
         Ok(r) => {
-            *s.recorder.lock().unwrap() = Some(r);
+            *recorder = Some(r);
             state::emit(UiEvent::Overlay {
                 text: format!("● Recording — {}", info.label),
                 color: OVERLAY_GREEN,
@@ -245,14 +255,13 @@ fn hotkey_pressed(id: u32) {
     }
 }
 
-fn hotkey_released(id: u32) {
+fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
     let s = state();
     let model_id = match s.hotkeys.lock().unwrap().get(&id) {
         Some(m) => m.clone(),
         None => return,
     };
-    let rec = s.recorder.lock().unwrap().take();
-    let rec = match rec {
+    let rec = match recorder.take() {
         Some(r) => r,
         None => return,
     };
@@ -268,16 +277,23 @@ fn hotkey_released(id: u32) {
         color: OVERLAY_YELLOW,
     });
 
+    // stop() pauses the CoreAudio stream — the Recorder is !Send, so it
+    // stays on the pump thread; only the samples cross to the worker.
+    let samples = rec.stop();
+    if samples.len() < 16000 / 5 {
+        state::emit(UiEvent::OverlayHide);
+        state::status_err("recording too short");
+        return;
+    }
     std::thread::spawn(move || {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let wav = config::recordings_dir().join(format!("rec-{}.wav", ts));
-        let samples = rec.stop(&wav);
-        if samples.len() < 16000 / 5 {
+        // Silence/fan-noise gate: below ~-40 dBFS RMS there is no speech to
+        // keep, so skip inference instead of inviting a hallucination.
+        let rms = (samples.iter().map(|x| x * x).sum::<f32>()
+            / samples.len().max(1) as f32)
+            .sqrt();
+        if rms < 0.01 {
             state::emit(UiEvent::OverlayHide);
-            state::status_err("recording too short");
+            state::status("no speech detected");
             return;
         }
         let res = state().engine.lock().unwrap().transcribe(&model_id, &samples);
@@ -358,20 +374,22 @@ fn load_tray_icon() -> tray_icon::Icon {
 
 async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
     let mut overlay: Option<WindowHandle<OverlayView>> = None;
+    // The active mic capture — !Send, owned by the pump on the main thread.
+    let mut recorder: Option<audio::Recorder> = None;
     loop {
         while let Ok(ev) = global_hotkey::GlobalHotKeyEvent::receiver().try_recv() {
             match ev.state {
-                global_hotkey::HotKeyState::Pressed => hotkey_pressed(ev.id),
-                global_hotkey::HotKeyState::Released => hotkey_released(ev.id),
+                global_hotkey::HotKeyState::Pressed => hotkey_pressed(ev.id, &mut recorder),
+                global_hotkey::HotKeyState::Released => hotkey_released(ev.id, &mut recorder),
             }
         }
         while let Some((pid, pressed)) =
             state().mod_events.lock().unwrap().pop_front()
         {
             if pressed {
-                hotkey_pressed(pid);
+                hotkey_pressed(pid, &mut recorder);
             } else {
-                hotkey_released(pid);
+                hotkey_released(pid, &mut recorder);
             }
         }
         while let Ok(ev) = muda::MenuEvent::receiver().try_recv() {
