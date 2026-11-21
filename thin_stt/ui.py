@@ -18,6 +18,57 @@ from . import audio, config, engines, hotkeys, models, typer
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 
+STYLESHEET = """
+QWidget { background: #09090b; color: #e4e4e7; font-family: 'Segoe UI', 'Inter'; font-size: 13px; }
+QMainWindow, QDialog { background: #09090b; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { background: transparent; color: #a1a1aa; padding: 6px 16px;
+               border: 1px solid transparent; border-radius: 6px; margin: 4px 2px 0 2px; }
+QTabBar::tab:selected { color: #fafafa; background: #18181b; border-color: #27272a; }
+QTabBar::tab:hover:!selected { color: #fafafa; }
+
+QLabel#muted { color: #a1a1aa; }
+QLabel#section { color: #fafafa; font-weight: 700; font-size: 13px; padding-top: 10px; }
+QLabel#engine-badge { background: #27272a; color: #a1a1aa; border-radius: 4px;
+                      padding: 1px 7px; font-size: 11px; }
+QLabel#status { color: #a1a1aa; }
+
+QWidget#card { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }
+
+QPushButton { background: #fafafa; color: #09090b; border: none; border-radius: 6px;
+              padding: 5px 14px; font-weight: 600; }
+QPushButton:hover:!disabled { background: #d4d4d8; }
+QPushButton:disabled { background: #27272a; color: #52525b; }
+QPushButton#secondary { background: transparent; color: #e4e4e7; border: 1px solid #3f3f46; }
+QPushButton#secondary:hover:!disabled { background: #27272a; }
+QPushButton#destructive { background: transparent; color: #f87171; border: 1px solid #3f3f46; }
+QPushButton#destructive:hover:!disabled { background: #450a0a; border-color: #7f1d1d; }
+QPushButton#danger { background: #7f1d1d; color: #fecaca; font-weight: 700; padding: 10px; }
+QPushButton#danger:hover { background: #991b1b; }
+QPushButton#ghost { background: transparent; color: #f87171; border: none; font-size: 14px; }
+QPushButton#ghost:hover:!disabled { background: #27272a; border-radius: 6px; }
+QPushButton#ghost:disabled { color: #3f3f46; }
+
+QKeySequenceEdit, QComboBox { background: #18181b; border: 1px solid #27272a;
+                              border-radius: 6px; padding: 4px 8px; color: #e4e4e7; }
+QKeySequenceEdit:focus, QComboBox:focus { border-color: #a1a1aa; }
+QComboBox QAbstractItemView { background: #18181b; color: #e4e4e7; border: 1px solid #27272a;
+                              selection-background-color: #27272a; outline: none; }
+QComboBox::drop-down { border: none; width: 20px; }
+
+QProgressBar { background: #27272a; border: none; border-radius: 5px;
+               text-align: center; color: #09090b; font-size: 10px; }
+QProgressBar::chunk { background: #fafafa; border-radius: 5px; }
+
+QScrollArea { border: none; background: transparent; }
+QStatusBar { background: #09090b; color: #a1a1aa; border-top: 1px solid #27272a; }
+QStatusBar::item { border: none; }
+QFrame[frameShape="4"], QFrame[frameShape="5"] { background: #27272a; max-height: 1px; border: none; }
+QToolTip { background: #18181b; color: #e4e4e7; border: 1px solid #27272a; padding: 4px; }
+QMenu { background: #18181b; border: 1px solid #27272a; }
+QMenu::item:selected { background: #27272a; }
+"""
+
 
 class Worker(QThread):
     done = Signal(object)
@@ -38,8 +89,9 @@ class Worker(QThread):
 class RecordingOverlay(QWidget):
     """Small always-on-top pill shown while recording."""
 
-    _CSS = ("background: rgba(30,30,30,230); color: {c}; font-weight: bold;"
-            "padding: 8px 16px; border-radius: 14px; font-size: 12pt;")
+    _CSS = ("background: rgba(24,24,27,240); color: {c}; font-weight: bold;"
+            "padding: 8px 16px; border-radius: 14px; font-size: 12pt;"
+            "border: 1px solid #3f3f46;")
 
     def __init__(self):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
@@ -75,20 +127,27 @@ class ModelRow(QWidget):
 
     def __init__(self, model: models.Model, cfg: dict):
         super().__init__()
+        self.setObjectName("card")
         self.model = model
         g = QGridLayout(self)
-        g.setContentsMargins(6, 4, 6, 4)
-        g.setHorizontalSpacing(8)
+        g.setContentsMargins(12, 8, 12, 8)
+        g.setHorizontalSpacing(10)
 
-        name = QLabel(f"<b>{model.label}</b>")
+        name = QLabel(model.label)
+        name.setStyleSheet("font-weight:600; color:#fafafa; background:transparent;")
         name.setMinimumWidth(185)
         engine = QLabel(model.engine)
-        engine.setStyleSheet("color:#888;")
+        engine.setObjectName("engine-badge")
+        engine.setStyleSheet("background:#27272a;")
         self.size_lbl = QLabel(f"~{model.approx_mb} MB")
         self.status_lbl = QLabel("—")
+        self.status_lbl.setObjectName("status")
+        self.status_lbl.setStyleSheet("background:transparent;")
         self.dl_btn = QPushButton("Download")
         self.del_btn = QPushButton("Delete")
+        self.del_btn.setObjectName("destructive")
         self.rec_btn = QPushButton("●")
+        self.rec_btn.setObjectName("ghost")
         self.rec_btn.setFixedWidth(34)
         self.rec_btn.setToolTip("Record now with this model")
         self.hk_edit = QKeySequenceEdit()
@@ -128,9 +187,9 @@ class ModelRow(QWidget):
         seq = ks.toString(QKeySequence.PortableText)
         self.hotkey_changed.emit(self.model.id, hotkeys.qt_seq_to_hotkey(seq))
 
-    def set_status(self, text: str, color: str = "#888"):
+    def set_status(self, text: str, color: str = "#a1a1aa"):
         self.status_lbl.setText(text)
-        self.status_lbl.setStyleSheet(f"color:{color};")
+        self.status_lbl.setStyleSheet(f"color:{color}; background:transparent;")
 
 
 class MainWindow(QMainWindow):
@@ -179,7 +238,7 @@ class MainWindow(QMainWindow):
         w = QWidget()
         v = QVBoxLayout(w)
         hint = QLabel("Hotkey works from any app: press → speak → press again → text is typed.")
-        hint.setStyleSheet("color:#888;")
+        hint.setObjectName("muted")
         v.addWidget(hint)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -192,7 +251,7 @@ class MainWindow(QMainWindow):
             if m.engine != last_engine:
                 last_engine = m.engine
                 hdr = QLabel("OpenAI Whisper" if m.engine == "whisper" else "NVIDIA Parakeet")
-                hdr.setStyleSheet("font-weight:bold; padding-top:6px;")
+                hdr.setObjectName("section")
                 grid.addWidget(hdr)
             row = ModelRow(m, self.cfg)
             row.download_clicked.connect(self.start_download)
@@ -298,14 +357,15 @@ class MainWindow(QMainWindow):
                 self.hk.set(mid, hk)
 
     def _row_hotkey_changed(self, model_id: str, hk: str):
-        if hk:
-            self.cfg["hotkeys"][model_id] = hk
-        else:
-            self.cfg["hotkeys"].pop(model_id, None)
+        # editingFinished fires on focus-out too; ignore empty/no-change writes
+        # so a saved hotkey isn't silently cleared.
+        if not hk or hk == self.cfg["hotkeys"].get(model_id, ""):
+            return
+        self.cfg["hotkeys"][model_id] = hk
         config.save(self.cfg)
         self.hk.set(model_id, hk)
         self.statusBar().showMessage(
-            f"{models.BY_ID[model_id].label} hotkey: {hk or 'cleared'}", 4000)
+            f"{models.BY_ID[model_id].label} hotkey: {hk}", 4000)
 
     # ---------- record / transcribe ----------
     def toggle_recording(self, model_id: str):
@@ -399,11 +459,11 @@ class MainWindow(QMainWindow):
         v.addWidget(line)
 
         danger = QPushButton("Completely delete this app")
-        danger.setStyleSheet("background:#b00020; color:white; font-weight:bold; padding:8px;")
+        danger.setObjectName("danger")
         danger.clicked.connect(self._uninstall)
         v.addWidget(danger)
         note = QLabel("Removes all models, settings, and the app folder itself.")
-        note.setStyleSheet("color:#888;")
+        note.setObjectName("muted")
         v.addWidget(note)
         v.addStretch(1)
         return w
@@ -473,6 +533,7 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    app.setStyleSheet(STYLESHEET)
     w = MainWindow()
     w.show()
     sys.exit(app.exec())
