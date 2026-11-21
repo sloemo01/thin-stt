@@ -59,20 +59,22 @@ PLIST
 # -- your certificate (created once on your Mac, stored in your keychain)
 if ! security find-certificate -c "$CERT_NAME" "$KEYCHAIN" >/dev/null 2>&1; then
     echo "Creating your signing certificate (one-time)..."
-    openssl req -x509 -newkey rsa:2048 -nodes \
+    if openssl req -x509 -newkey rsa:2048 -nodes \
         -keyout "$WORK/key.pem" -out "$WORK/cert.pem" \
         -days 3650 -subj "/CN=$CERT_NAME/O=Thin STT" \
         -addext "keyUsage=critical,digitalSignature" \
-        -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1
-    openssl pkcs12 -export -out "$WORK/thinstt.p12" \
-        -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass: >/dev/null 2>&1
-    security import "$WORK/thinstt.p12" -k "$KEYCHAIN" -T /usr/bin/codesign >/dev/null
-    security set-key-partition-list -S apple-tool:,apple:,codesign: \
-        -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || true
-    echo "If macOS asks to allow key access, click 'Always Allow'."
+        -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1 \
+    && openssl pkcs12 -export -out "$WORK/thinstt.p12" \
+        -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass: >/dev/null 2>&1 \
+    && security import "$WORK/thinstt.p12" -k "$KEYCHAIN" \
+        -T /usr/bin/codesign >/dev/null; then
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || true
+        echo "If macOS asks to allow key access, click 'Always Allow'."
+    else
+        echo "Could not create the signing certificate."; exit 1
+    fi
 fi
-security find-certificate -c "$CERT_NAME" "$KEYCHAIN" >/dev/null 2>&1 \
-    || { echo "Could not create the signing certificate."; exit 1; }
 
 codesign --force --deep --sign "$CERT_NAME" "$APP"
 codesign --verify --verbose=2 "$APP" 2>&1 | tail -2
