@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+app.log
+test.wav
+dist/
+build/
