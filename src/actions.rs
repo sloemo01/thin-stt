@@ -155,7 +155,7 @@ pub fn check_for_updates() {
         let remote_stamp = ureq::get(build_url)
             .call()
             .ok()
-            .and_then(|r| r.body_mut().read_to_string().ok())
+            .and_then(|mut r| r.body_mut().read_to_string().ok())
             .and_then(|s| s.trim().parse::<u64>().ok());
         if let Some(remote) = remote_stamp {
             let local = build_stamp();
