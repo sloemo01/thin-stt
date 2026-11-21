@@ -40,6 +40,20 @@ if [ ! -f "$WORK/src/Cargo.toml" ]; then
 fi
 
 cd "$WORK/src"
+
+# gpui compiles Metal shaders — needs the `metal` tool, which lives in
+# full Xcode (not the Command Line Tools alone). If Xcode is installed
+# but xcode-select still points at the CLT, use it via DEVELOPER_DIR.
+if ! xcrun -f metal >/dev/null 2>&1; then
+    if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    else
+        echo "Full Xcode is required to build (gpui compiles Metal shaders)."
+        echo "Install Xcode from the App Store, then re-run the installer."
+        exit 1
+    fi
+fi
+
 echo "Building (first run compiles ~600 crates — a few minutes)..."
 cargo build --release --quiet
 
@@ -78,8 +92,43 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc sign (no Developer ID needed) so macOS keeps TCC grants stable
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+# Sign with a local self-signed certificate (created once, stored in your
+# login keychain). Unlike ad-hoc signing this gives the app a stable
+# identity, so macOS keeps Microphone/Accessibility grants across updates.
+CERT_NAME="Thin STT Local Signing"
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+if ! security find-certificate -c "$CERT_NAME" "$KEYCHAIN" >/dev/null 2>&1; then
+    echo "Creating local signing certificate (one-time)..."
+    if openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout "$WORK/thinstt-key.pem" -out "$WORK/thinstt-cert.pem" \
+        -days 3650 -subj "/CN=$CERT_NAME/O=Thin STT" \
+        -addext "keyUsage=critical,digitalSignature" \
+        -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1 \
+    && { openssl pkcs12 -export -legacy -out "$WORK/thinstt.p12" \
+        -inkey "$WORK/thinstt-key.pem" -in "$WORK/thinstt-cert.pem" \
+        -passout pass:thinstt-local >/dev/null 2>&1 \
+      || openssl pkcs12 -export -out "$WORK/thinstt.p12" \
+        -inkey "$WORK/thinstt-key.pem" -in "$WORK/thinstt-cert.pem" \
+        -passout pass:thinstt-local >/dev/null 2>&1; } \
+    && security import "$WORK/thinstt.p12" -k "$KEYCHAIN" \
+        -T /usr/bin/codesign -P thinstt-local >/dev/null; then
+        # Let codesign use the key without prompting on every rebuild
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || true
+    else
+        echo "Certificate creation failed — falling back to ad-hoc signing."
+    fi
+fi
+
+if security find-certificate -c "$CERT_NAME" "$KEYCHAIN" >/dev/null 2>&1; then
+    codesign --force --deep --sign "$CERT_NAME" "$APP" 2>/dev/null || {
+        echo "Note: if macOS asks to allow key access, click 'Always Allow'."
+        codesign --force --deep --sign "$CERT_NAME" "$APP"
+    }
+else
+    # Fall back to ad-hoc signing if certificate creation failed
+    codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+fi
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
 echo "Installed: $APP"
