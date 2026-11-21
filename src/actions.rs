@@ -234,7 +234,16 @@ pub fn clear_model_cache() {
             } else {
                 true // stray folder not tied to a model
             };
-            if !remove || is_fresh(&path) {
+            if !remove {
+                continue;
+            }
+            // Don't pull a dir out from under a live download — ours is in
+            // the downloads map; another process's shows recent writes.
+            // A cancelled download is in neither, so it clears now.
+            let in_flight = models::by_id(&name)
+                .map(|i| s.downloads.lock().unwrap().contains_key(i.id))
+                .unwrap_or(false);
+            if in_flight || (path.is_dir() && models::by_id(&name).is_none() && is_fresh(&path)) {
                 continue;
             }
             if let Some(info) = models::by_id(&name) {
