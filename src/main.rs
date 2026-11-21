@@ -13,6 +13,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gpui::*;
+use objc::{msg_send, sel, sel_impl};
 use overlay::OverlayView;
 use state::{state, UiEvent};
 use ui::ThinSttView;
@@ -40,6 +41,13 @@ fn main() {
         *state().ui.lock().unwrap() = Some(tx);
 
         state::reregister_hotkeys();
+        let swept = actions::cleanup_partial();
+        if swept > 0 {
+            state::status(format!(
+                "cleared {:.0} MB of partial downloads",
+                swept as f64 / 1048576.0
+            ));
+        }
         actions::fetch_remote_sizes();
         setup_tray();
         open_main_window(cx);
@@ -129,7 +137,7 @@ fn show_overlay(
         }
     }
     let pos = overlay_position(cx);
-    cx.open_window(
+    let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: pos,
@@ -151,7 +159,33 @@ fn show_overlay(
         },
         |_window, cx| cx.new(|_| OverlayView::new(text.clone(), color)),
     )
-    .ok()
+    .ok();
+    if let Some(h) = opened {
+        let _ = h.update(cx, |_v, window, _cx| {
+            // Kill the NSPanel's drop shadow — it renders as a dark box
+            // behind the transparent pill window.
+            if let Ok(rwh) = raw_window_handle::HasWindowHandle::window_handle(window) {
+                if let raw_window_handle::RawWindowHandle::AppKit(kit) = rwh.as_raw() {
+                    unsafe {
+                        #[allow(deprecated)]
+                        let view: cocoa::base::id = kit.ns_view.as_ptr() as cocoa::base::id;
+                        let ns: cocoa::base::id = msg_send![view, window];
+                        #[allow(deprecated)]
+                        cocoa::appkit::NSWindow::setHasShadow_(ns, cocoa::base::NO);
+                        let _: () = msg_send![ns, setOpaque: false];
+                        let clear: cocoa::base::id =
+                            msg_send![objc::class!(NSColor), clearColor];
+                        let _: () = msg_send![ns, setBackgroundColor: clear];
+                        // NSTitlebarSeparatorStyleNone — the hidden titlebar
+                        // otherwise leaves a hairline along the window's top.
+                        let _: () = msg_send![ns, setTitlebarSeparatorStyle: 1usize];
+                    }
+                }
+            }
+        });
+        return Some(h);
+    }
+    None
 }
 
 fn hide_overlay(cx: &mut App, overlay: &mut Option<WindowHandle<OverlayView>>) {

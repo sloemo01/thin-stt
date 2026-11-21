@@ -4,7 +4,7 @@ use gpui::{
     div, prelude::*, px, rgb, Context, FocusHandle, KeyDownEvent, SharedString, Window,
 };
 
-use crate::{actions, audio, config, hotkeys, models, state, typer};
+use crate::{actions, audio, hotkeys, models, state, typer};
 
 const BG: u32 = 0x141419;
 const CARD: u32 = 0x1f1f27;
@@ -363,7 +363,40 @@ impl ThinSttView {
                 .child(modes),
         );
 
-        // models dir
+        // updates
+        card = card.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().text_sm().child("Updates"))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(MUTED))
+                                .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                        )
+                        .child(
+                            ghost_btn("Check for updates")
+                                .id("check-update")
+                                .on_click(cx.listener(|_v, _e, _w, cx| {
+                                    actions::check_for_updates();
+                                    cx.notify();
+                                })),
+                        ),
+                ),
+        );
+
+        // models dir + clear cache
+        let cache_mb: u64 = models::MODELS
+            .iter()
+            .map(|m| models::disk_size_mb(m.id) as u64)
+            .sum();
         card = card.child(
             div()
                 .flex()
@@ -372,9 +405,23 @@ impl ThinSttView {
                 .child(div().text_sm().child("Model cache"))
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(rgb(MUTED))
-                        .child(config::models_dir().display().to_string()),
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(MUTED))
+                                .child(format!("{} MB used", cache_mb)),
+                        )
+                        .child(
+                            ghost_btn("Clear cache")
+                                .id("clear-cache")
+                                .on_click(cx.listener(|_v, _e, _w, cx| {
+                                    actions::clear_model_cache();
+                                    cx.notify();
+                                })),
+                        ),
                 ),
         );
 

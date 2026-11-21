@@ -135,6 +135,148 @@ fn cleanup(dir: &std::path::Path) {
     }
 }
 
+/// Check GitHub for a newer release; report via status line and, when an
+/// update exists, a macOS notification.
+pub fn check_for_updates() {
+    state::status("checking for updates…");
+    std::thread::spawn(|| {
+        // Avoid the GitHub API (60 req/hr unauthenticated): HEAD the stable
+        // download URL and read the tag out of its redirect Location.
+        let url = "https://github.com/sloemo01/thin-stt/releases/latest/download/Thin-STT.dmg";
+        let agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .build()
+            .new_agent();
+        let tag = agent
+            .head(url)
+            .call()
+            .ok()
+            .and_then(|r| {
+                let loc = r.headers().get("location")?.to_str().ok()?;
+                // .../releases/download/<tag>/Thin-STT.dmg
+                let mut parts = loc.split('/');
+                let pos = parts.clone().position(|p| p == "download")?;
+                parts.nth(pos + 1).map(String::from)
+            });
+        match tag {
+            Some(tag) => {
+                let latest = semver_of(&tag);
+                let current = semver_of(env!("CARGO_PKG_VERSION"));
+                if latest > current {
+                    let msg = format!("Update available: {} (you have v{})", tag, env!("CARGO_PKG_VERSION"));
+                    notify_macos("Thin STT", &msg);
+                    state::status(msg);
+                } else {
+                    state::status(format!("up to date (v{})", env!("CARGO_PKG_VERSION")));
+                }
+            }
+            None => state::status_err("update check failed"),
+        }
+    });
+}
+
+/// Strip tag decorations like "v0.1.0-macos" down to (major, minor, patch).
+fn semver_of(s: &str) -> (u64, u64, u64) {
+    let core = s.trim_start_matches('v').split('-').next().unwrap_or("");
+    let mut it = core.split('.');
+    (
+        it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+        it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+        it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+    )
+}
+
+fn notify_macos(title: &str, body: &str) {
+    let script = format!(
+        "display notification {:?} with title {:?}",
+        body.replace('"', "\\\""),
+        title.replace('"', "\\\"")
+    );
+    let _ = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .spawn();
+}
+
+/// Remove every downloaded model + stray files. Returns bytes freed.
+pub fn clear_model_cache() {
+    let s = state::state();
+    let dir = config::models_dir();
+    let mut freed: u64 = dir_size(&dir);
+    // drop in-memory engine state + cancel downloads for all models
+    let ids: Vec<String> = models::MODELS.iter().map(|m| m.id.to_string()).collect();
+    for id in &ids {
+        state::cancel_download(id);
+        s.engine.lock().unwrap().drop_model(id);
+    }
+    if dir.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    state::emit(state::UiEvent::StateChanged);
+    freed = freed.max(0);
+    if freed == 0 {
+        state::status("model cache already empty");
+    } else {
+        state::status(format!("model cache cleared — freed {:.0} MB", freed as f64 / 1048576.0));
+    }
+}
+
+fn dir_size(dir: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let md = e.metadata().ok();
+            match (e.file_type().ok(), md) {
+                (Some(t), Some(_)) if t.is_dir() => total += dir_size(&e.path()),
+                (Some(t), Some(m)) if t.is_file() => total += m.len(),
+                _ => {}
+            }
+        }
+    }
+    total
+}
+
+/// Startup sweep: delete partial downloads, orphan folders, and incomplete
+/// model dirs left by crashes/interruptions. Returns bytes freed.
+pub fn cleanup_partial() -> u64 {
+    let dir = config::models_dir();
+    if !dir.is_dir() {
+        return 0;
+    }
+    let mut freed = 0u64;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            let known = models::by_id(&name);
+            let remove = if path.is_file() {
+                name.ends_with(".part")
+            } else if let Some(info) = known {
+                // incomplete download or stray .part inside
+                !models::is_downloaded(info) || has_part(&path)
+            } else {
+                true // unknown folder
+            };
+            if remove {
+                freed += dir_size(&path);
+                if path.is_dir() {
+                    let _ = std::fs::remove_dir_all(&path);
+                } else {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+    }
+    freed
+}
+
+fn has_part(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|es| es.flatten().any(|e| e.file_name().to_string_lossy().ends_with(".part")))
+        .unwrap_or(false)
+}
+
 pub fn delete_model(model_id: &str) {
     let s = state::state();
     state::cancel_download(model_id);
