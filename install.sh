@@ -1,16 +1,69 @@
 #!/bin/sh
 # Thin STT for macOS — curl installer. Run via:
 #   curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/main/install.sh | sh
-# Builds from source, assembles "Thin STT.app", ad-hoc signs it, installs to ~/Applications.
+#
+# Downloads the latest signed release DMG, mounts it, and copies
+# "Thin STT.app" into /Applications — with retries for transient
+# mount/copy glitches. No Xcode or Rust needed.
+#
+# To build from source instead:  sh install.sh --source
 set -eu
 
 APP_NAME="Thin STT"
-APP_DIR="$HOME/Applications"
-APP="$APP_DIR/$APP_NAME.app"
+APP="/Applications/$APP_NAME.app"
 REPO="https://github.com/sloemo01/thin-stt"
-BRANCH="main"
+DMG_URL="$REPO/releases/latest/download/Thin-STT.dmg"
 
 echo "== Thin STT for macOS =="
+
+if [ "${1:-}" != "--source" ]; then
+    WORK="$(mktemp -d /tmp/thinstt.XXXXXX)"
+    trap 'rm -rf "$WORK"; hdiutil detach "$MOUNT" 2>/dev/null || true' EXIT
+    MOUNT=""
+
+    echo "Downloading release..."
+    curl -fsSL -o "$WORK/Thin-STT.dmg" "$DMG_URL"
+
+    # Mount + copy with retries: hdiutil occasionally mounts a volume that
+    # fails file reads mid-copy (transient I/O error). Fresh mount fixes it.
+    ok=0
+    for i in 1 2 3 4 5; do
+        [ -n "$MOUNT" ] && hdiutil detach "$MOUNT" 2>/dev/null || true
+        MOUNT="$(hdiutil attach "$WORK/Thin-STT.dmg" -nobrowse -readonly 2>/dev/null \
+            | awk '{i=index($0,"/Volumes/"); if(i){print substr($0,i); exit}}')"
+        [ -d "$MOUNT/$APP_NAME.app" ] || continue
+        rm -rf "$APP" 2>/dev/null || true
+        if ditto "$MOUNT/$APP_NAME.app" "$APP" 2>/dev/null; then
+            ok=1
+            break
+        fi
+        echo "Copy failed (attempt $i) — remounting and retrying..."
+        sleep 1
+    done
+    hdiutil detach "$MOUNT" 2>/dev/null || true
+    MOUNT=""
+
+    if [ "$ok" -ne 1 ]; then
+        echo "Install failed: could not copy the app off the disk image."
+        echo "Try again, or mount $WORK/Thin-STT.dmg and drag the app manually."
+        exit 1
+    fi
+
+    xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+
+    echo "Installed: $APP"
+    echo "On first launch macOS will ask for Microphone + Accessibility permission."
+    open "$APP"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Source build (--source): compile locally, sign with a local self-signed cert.
+# ---------------------------------------------------------------------------
+
+APP_DIR="$HOME/Applications"
+APP="$APP_DIR/$APP_NAME.app"
+BRANCH="main"
 
 # Xcode Command Line Tools (clang, git, iconutil are needed for the build)
 if ! xcode-select -p >/dev/null 2>&1; then
