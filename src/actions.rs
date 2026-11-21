@@ -45,6 +45,8 @@ pub fn start_download(model_id: &str) {
         state::state().downloads.lock().unwrap().remove(&id);
         match result {
             Ok(()) => {
+                // warm the engine so the first dictation skips the model load
+                state::state().engine.lock().unwrap().preload(&id);
                 state::status(format!("{} ready", info.label));
             }
             Err(e) => {
@@ -311,6 +313,21 @@ fn dir_size(dir: &std::path::Path) -> u64 {
         }
     }
     total
+}
+
+/// Older builds persisted every dictation as rec-*.wav under Application
+/// Support — audio now never touches disk. Sweep the leftovers once at
+/// launch so the cache dir doesn't grow forever.
+pub fn sweep_recordings() {
+    let dir = config::recordings_dir();
+    if dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+        let _ = std::fs::remove_dir(&dir);
+    }
 }
 
 /// Startup sweep: delete partial downloads, orphan folders, and incomplete
