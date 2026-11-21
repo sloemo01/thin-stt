@@ -6638,6 +6638,7 @@ name = "thin-stt"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "cocoa 0.26.1",
  "cpal",
  "dirs 6.0.0",
  "enigo",
@@ -6650,7 +6651,9 @@ dependencies = [
  "log",
  "macos-accessibility-client",
  "muda",
+ "objc",
  "ort",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "transcribe-rs",
