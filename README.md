@@ -16,6 +16,16 @@ Models run fully local via [onnx-asr](https://github.com/istupakov/onnx-asr) (ON
 
 ## Install
 
+**One-liner** (downloads, creates a venv, adds a Desktop shortcut, launches):
+
+```
+curl -L https://raw.githubusercontent.com/sloemo01/thin-stt/master/install.ps1 -o %TEMP%\thinstt.ps1 && powershell -ExecutionPolicy Bypass -File %TEMP%\thinstt.ps1
+```
+
+Needs Python 3.10–3.12 on PATH.
+
+**Manual:**
+
 ```
 pip install -r requirements.txt
 python -m thin_stt
