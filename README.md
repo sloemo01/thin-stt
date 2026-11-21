@@ -23,7 +23,7 @@ A thin wrapper for local speech-to-text. **Hold** a hotkey in **any app**, speak
 One-liner — paste into Terminal:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/main/install.sh | sh
 ```
 
 Downloads the source, builds it with cargo, assembles `Thin STT.app` (ad-hoc signed — no Developer ID needed), and drops it in `~/Applications`. Requires Xcode Command Line Tools (`xcode-select --install`); rustup is installed automatically if cargo is missing.
@@ -42,7 +42,7 @@ cargo build --release
 One-liner — paste into Command Prompt (`cmd`) or Run dialog (`Win+R`):
 
 ```
-curl -L https://raw.githubusercontent.com/sloemo01/thin-stt/master/install.ps1 -o %TEMP%\thinstt.ps1 && powershell -ExecutionPolicy Bypass -File %TEMP%\thinstt.ps1
+curl -L https://raw.githubusercontent.com/sloemo01/thin-stt/main/install.ps1 -o %TEMP%\thinstt.ps1 && powershell -ExecutionPolicy Bypass -File %TEMP%\thinstt.ps1
 ```
 
 In PowerShell use `curl.exe` and `;` instead of `curl` and `&&`. Downloads the repo, creates a venv, adds a Desktop shortcut, and launches the app. Needs Python 3.10–3.12 on PATH.

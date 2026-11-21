@@ -1,6 +1,6 @@
 #!/bin/sh
 # Thin STT for macOS — curl installer. Run via:
-#   curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/master/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/main/install.sh | sh
 # Builds from source, assembles "Thin STT.app", ad-hoc signs it, installs to ~/Applications.
 set -eu
 
@@ -8,7 +8,7 @@ APP_NAME="Thin STT"
 APP_DIR="$HOME/Applications"
 APP="$APP_DIR/$APP_NAME.app"
 REPO="https://github.com/sloemo01/thin-stt"
-BRANCH="master"
+BRANCH="main"
 
 echo "== Thin STT for macOS =="
 
