@@ -40,6 +40,20 @@ if [ ! -f "$WORK/src/Cargo.toml" ]; then
 fi
 
 cd "$WORK/src"
+
+# gpui compiles Metal shaders — needs the `metal` tool, which lives in
+# full Xcode (not the Command Line Tools alone). If Xcode is installed
+# but xcode-select still points at the CLT, use it via DEVELOPER_DIR.
+if ! xcrun -f metal >/dev/null 2>&1; then
+    if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    else
+        echo "Full Xcode is required to build (gpui compiles Metal shaders)."
+        echo "Install Xcode from the App Store, then re-run the installer."
+        exit 1
+    fi
+fi
+
 echo "Building (first run compiles ~600 crates — a few minutes)..."
 cargo build --release --quiet
 

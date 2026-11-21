@@ -18,6 +18,14 @@ echo "== Thin STT distributor =="
 command -v cargo >/dev/null 2>&1 || { . "$HOME/.cargo/env"; }
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found — run install.sh first or install rustup."; exit 1; }
 
+if ! xcrun -f metal >/dev/null 2>&1; then
+    if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    else
+        echo "Full Xcode is required to build (gpui compiles Metal shaders)."; exit 1
+    fi
+fi
+
 cargo build --release --quiet
 
 WORK="$(mktemp -d /tmp/thinstt-dist.XXXXXX)"
