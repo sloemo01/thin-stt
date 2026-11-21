@@ -106,12 +106,12 @@ if ! security find-certificate -c "$CERT_NAME" "$KEYCHAIN" >/dev/null 2>&1; then
         -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1 \
     && { openssl pkcs12 -export -legacy -out "$WORK/thinstt.p12" \
         -inkey "$WORK/thinstt-key.pem" -in "$WORK/thinstt-cert.pem" \
-        -passout pass: >/dev/null 2>&1 \
+        -passout pass:thinstt-local >/dev/null 2>&1 \
       || openssl pkcs12 -export -out "$WORK/thinstt.p12" \
         -inkey "$WORK/thinstt-key.pem" -in "$WORK/thinstt-cert.pem" \
-        -passout pass: >/dev/null 2>&1; } \
+        -passout pass:thinstt-local >/dev/null 2>&1; } \
     && security import "$WORK/thinstt.p12" -k "$KEYCHAIN" \
-        -T /usr/bin/codesign >/dev/null; then
+        -T /usr/bin/codesign -P thinstt-local >/dev/null; then
         # Let codesign use the key without prompting on every rebuild
         security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || true

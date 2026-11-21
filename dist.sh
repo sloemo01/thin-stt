@@ -73,11 +73,11 @@ if ! security find-certificate -c "$CERT_NAME" "$KEYCHAIN" >/dev/null 2>&1; then
         -addext "keyUsage=critical,digitalSignature" \
         -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1 \
     && { openssl pkcs12 -export -legacy -out "$WORK/thinstt.p12" \
-        -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass: >/dev/null 2>&1 \
+        -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass:thinstt-local >/dev/null 2>&1 \
       || openssl pkcs12 -export -out "$WORK/thinstt.p12" \
-        -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass: >/dev/null 2>&1; } \
+        -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass:thinstt-local >/dev/null 2>&1; } \
     && security import "$WORK/thinstt.p12" -k "$KEYCHAIN" \
-        -T /usr/bin/codesign >/dev/null; then
+        -T /usr/bin/codesign -P thinstt-local >/dev/null; then
         security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || true
         echo "If macOS asks to allow key access, click 'Always Allow'."
