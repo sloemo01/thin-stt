@@ -72,8 +72,10 @@ if ! security find-certificate -c "$CERT_NAME" "$KEYCHAIN" >/dev/null 2>&1; then
         -days 3650 -subj "/CN=$CERT_NAME/O=Thin STT" \
         -addext "keyUsage=critical,digitalSignature" \
         -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1 \
-    && openssl pkcs12 -export -out "$WORK/thinstt.p12" \
+    && { openssl pkcs12 -export -legacy -out "$WORK/thinstt.p12" \
         -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass: >/dev/null 2>&1 \
+      || openssl pkcs12 -export -out "$WORK/thinstt.p12" \
+        -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -passout pass: >/dev/null 2>&1; } \
     && security import "$WORK/thinstt.p12" -k "$KEYCHAIN" \
         -T /usr/bin/codesign >/dev/null; then
         security set-key-partition-list -S apple-tool:,apple:,codesign: \
