@@ -137,11 +137,42 @@ fn cleanup(dir: &std::path::Path) {
 
 /// Check GitHub for a newer release; report via status line and, when an
 /// update exists, a macOS notification.
+/// This build's stamp — dist.sh writes the unix build time into
+/// src/buildstamp.txt before compiling and ships it as a `build.txt`
+/// release asset, so the check compares builds, not just the semver.
+fn build_stamp() -> u64 {
+    include_str!("buildstamp.txt").trim().parse().unwrap_or(0)
+}
+
 pub fn check_for_updates() {
     state::status("checking for updates…");
     std::thread::spawn(|| {
-        // Avoid the GitHub API (60 req/hr unauthenticated): HEAD the stable
-        // download URL and read the tag out of its redirect Location.
+        // The release carries a build.txt companion asset holding the
+        // unix timestamp dist.sh stamped the build with. Same stamp =
+        // same build; newer = update. No API call, no rate limit.
+        let build_url =
+            "https://github.com/sloemo01/thin-stt/releases/latest/download/build.txt";
+        let remote_stamp = ureq::get(build_url)
+            .call()
+            .ok()
+            .and_then(|mut r| r.body_mut().read_to_string().ok())
+            .and_then(|s| s.trim().parse::<u64>().ok());
+        if let Some(remote) = remote_stamp {
+            let local = build_stamp();
+            if remote > local {
+                let msg = format!(
+                    "Update available (build {}) — you have build {}",
+                    remote, local
+                );
+                notify_macos("Thin STT", &msg);
+                state::status(msg);
+            } else {
+                state::status(format!("up to date (build {})", local));
+            }
+            return;
+        }
+        // Older releases have no build.txt — fall back to comparing the
+        // tag version pulled from the DMG redirect Location.
         let url = "https://github.com/sloemo01/thin-stt/releases/latest/download/Thin-STT.dmg";
         let agent = ureq::Agent::config_builder()
             .max_redirects(0)
