@@ -226,8 +226,22 @@ impl ThinSttView {
             .child(controls)
     }
 
-    fn render_capture(&mut self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    fn render_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let m = self.capturing_for.clone().unwrap_or_default();
+
+        // Bare modifiers produce no key events — watch flags changes and
+        // assign whatever modifier set is currently held.
+        let view = cx.entity();
+        window.on_modifiers_changed(move |ev, _w, cx| {
+            if let Some(spec) = hotkeys::from_modifiers(&ev.modifiers) {
+                let _ = view.update(cx, |v, vc| {
+                    if let Some(id) = v.capturing_for.take() {
+                        actions::set_hotkey(&id, &spec);
+                    }
+                    vc.notify();
+                });
+            }
+        });
         div()
             .id("capture")
             .track_focus(&self.focus)
@@ -500,9 +514,9 @@ impl ThinSttView {
 }
 
 impl Render for ThinSttView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.capturing_for.is_some() {
-            return self.render_capture(cx);
+            return self.render_capture(window, cx);
         }
 
         let mut models_list = div().flex().flex_col().gap_2();

@@ -41,6 +41,7 @@ fn main() {
         *state().ui.lock().unwrap() = Some(tx);
 
         state::reregister_hotkeys();
+        install_flags_monitor();
         let swept = actions::cleanup_partial();
         if swept > 0 {
             state::status(format!(
@@ -302,6 +303,33 @@ fn hotkey_released(id: u32) {
     });
 }
 
+/// Watch global modifier changes (flagsChanged) so bare modifier hotkeys —
+/// "alt", "ctrl", "ctrl+alt", "cmd" — work. global-hotkey can't register
+/// modifier-only combos, so we track them ourselves.
+fn install_flags_monitor() {
+    unsafe {
+        // NSFlagsChangedMask
+        let mask: u64 = 1 << 12;
+        let block = block::ConcreteBlock::new(|event: cocoa::base::id| {
+            let flags: u64 = msg_send![event, modifierFlags];
+            state::flags_changed(flags);
+        })
+        .copy();
+        let observer: cocoa::base::id = msg_send![
+            objc::class!(NSEvent),
+            addGlobalMonitorForEventsMatchingMask: mask
+            handler: &*block
+        ];
+        if observer.is_null() {
+            state::status_err(
+                "modifier hotkeys need Accessibility permission (Settings → enable typing access)",
+            );
+        }
+        std::mem::forget(block);
+        std::mem::forget(observer);
+    }
+}
+
 fn setup_tray() {
     let menu = muda::Menu::new();
     let show = muda::MenuItem::with_id("show", "Show Thin STT", true, None);
@@ -335,6 +363,15 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
             match ev.state {
                 global_hotkey::HotKeyState::Pressed => hotkey_pressed(ev.id),
                 global_hotkey::HotKeyState::Released => hotkey_released(ev.id),
+            }
+        }
+        while let Some((pid, pressed)) =
+            state().mod_events.lock().unwrap().pop_front()
+        {
+            if pressed {
+                hotkey_pressed(pid);
+            } else {
+                hotkey_released(pid);
             }
         }
         while let Ok(ev) = muda::MenuEvent::receiver().try_recv() {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
@@ -30,6 +30,12 @@ pub struct AppState {
     pub downloads: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub ui: Mutex<Option<mpsc::Sender<UiEvent>>>,
     pub hotkey_manager: Mutex<global_hotkey::GlobalHotKeyManager>,
+    /// pseudo_id -> required modifier bits for modifier-only hotkeys
+    pub mod_watch: Mutex<Vec<(u32, u8)>>,
+    /// pseudo_id -> currently held (to emit transitions)
+    pub mod_held: Mutex<HashMap<u32, bool>>,
+    /// press/release events synthesized by the flagsChanged monitor
+    pub mod_events: Mutex<VecDeque<(u32, bool)>>,
 }
 
 pub fn state() -> &'static Arc<AppState> {
@@ -44,6 +50,9 @@ pub fn state() -> &'static Arc<AppState> {
             downloads: Mutex::new(HashMap::new()),
             ui: Mutex::new(None),
             hotkey_manager: Mutex::new(global_hotkey::GlobalHotKeyManager::new().unwrap()),
+            mod_watch: Mutex::new(Vec::new()),
+            mod_held: Mutex::new(HashMap::new()),
+            mod_events: Mutex::new(VecDeque::new()),
         })
     })
 }
@@ -88,11 +97,42 @@ pub fn reregister_hotkeys() {
     registered.clear();
     ids.clear();
 
+    s.mod_watch.lock().unwrap().clear();
+    s.mod_held.lock().unwrap().clear();
+
+    let mut next_pseudo: u32 = 0xF000_0000;
     for (model_id, spec) in specs {
-        if let Some(hk) = crate::hotkeys::parse(&spec) {
-            let _ = mgr.register(hk);
-            ids.insert(hk.id(), model_id.clone());
-            registered.insert(model_id, hk);
+        match crate::hotkeys::parse(&spec) {
+            Some(crate::hotkeys::Trigger::Keyed(hk)) => {
+                let _ = mgr.register(hk);
+                ids.insert(hk.id(), model_id.clone());
+                registered.insert(model_id, hk);
+            }
+            Some(crate::hotkeys::Trigger::Mods(bits)) => {
+                let pid = next_pseudo;
+                next_pseudo += 1;
+                ids.insert(pid, model_id.clone());
+                s.mod_watch.lock().unwrap().push((pid, bits));
+            }
+            None => {}
+        }
+    }
+}
+
+/// Called by the NSEvent flagsChanged monitor: emit press/release transitions
+/// for every watched modifier-only combo.
+pub fn flags_changed(ns_flags: u64) {
+    let bits = crate::hotkeys::ns_flags_to_bits(ns_flags);
+    let s = state();
+    let watch = s.mod_watch.lock().unwrap().clone();
+    let mut held = s.mod_held.lock().unwrap();
+    let mut events = s.mod_events.lock().unwrap();
+    for (pid, needed) in watch {
+        let now = bits & needed == needed;
+        let was = held.get(&pid).copied().unwrap_or(false);
+        if now != was {
+            held.insert(pid, now);
+            events.push_back((pid, now));
         }
     }
 }

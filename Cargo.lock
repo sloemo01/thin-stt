@@ -6638,6 +6638,7 @@ name = "thin-stt"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "block",
  "cocoa 0.26.1",
  "cpal",
  "dirs 6.0.0",
