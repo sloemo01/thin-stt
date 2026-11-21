@@ -26,7 +26,12 @@ if ! xcrun -f metal >/dev/null 2>&1; then
     fi
 fi
 
+# Stamp this build — the app embeds it and dist/build.txt carries it
+# to the release so Check for Updates compares builds, not just semver.
+BUILD_STAMP="$(date +%s)"
+echo "$BUILD_STAMP" > src/buildstamp.txt
 cargo build --release --quiet
+echo 0 > src/buildstamp.txt   # keep the tree clean; stamp lives in the binary
 
 WORK="$(mktemp -d /tmp/thinstt-dist.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
@@ -98,6 +103,7 @@ if [ "$FORMAT" = "dmg" ]; then
 else
     (cd "$DIST_DIR" && zip -qry "Thin-STT.zip" "$APP_NAME.app")
 fi
+echo "$BUILD_STAMP" > "$DIST_DIR/build.txt"
 echo ""
 echo "Done: $OUT"
 echo "Signed by: $CERT_NAME (your local certificate)"
