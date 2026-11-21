@@ -23,7 +23,7 @@ def recordings_dir() -> Path:
 DEFAULTS = {
     "hotkeys": {},        # model_id -> hotkey string e.g. "ctrl+alt+1"
     "mic_device": None,   # sounddevice device index or None for default
-    "paste_mode": "paste",  # "paste" (ctrl+v) | "type" (keystrokes) | "clipboard"
+    "paste_mode": "type",  # "type" (keystrokes) | "paste" (ctrl+v) | "clipboard"
     "remote_sizes": {},   # model_id -> bytes, cached remote size lookups
 }
 

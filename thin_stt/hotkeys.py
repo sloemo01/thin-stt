@@ -1,4 +1,8 @@
-"""Global hotkeys via the `keyboard` package (works from any app)."""
+"""Global hotkeys via the `keyboard` package (works from any app).
+
+Hold-to-talk: the press handler fires when the combo goes down, the release
+handler when it comes up — record while held, transcribe on release.
+"""
 
 import keyboard
 
@@ -16,22 +20,26 @@ def qt_seq_to_hotkey(seq: str) -> str:
 
 
 class HotkeyManager:
-    """model_id -> hotkey. Pressing toggles record/transcribe for that model."""
+    """model_id -> hotkey, with separate press and release callbacks."""
 
-    def __init__(self, on_trigger):
-        self._on_trigger = on_trigger
-        self._handles: dict[str, object] = {}
+    def __init__(self, on_press, on_release):
+        self._on_press = on_press
+        self._on_release = on_release
+        self._handles: dict[str, tuple] = {}
 
     def set(self, model_id: str, hotkey: str) -> None:
         self.clear(model_id)
         if not hotkey:
             return
-        self._handles[model_id] = keyboard.add_hotkey(
-            hotkey, lambda mid=model_id: self._on_trigger(mid))
+        press = keyboard.add_hotkey(
+            hotkey, lambda mid=model_id: self._on_press(mid))
+        release = keyboard.add_hotkey(
+            hotkey, lambda mid=model_id: self._on_release(mid),
+            trigger_on_release=True)
+        self._handles[model_id] = (press, release)
 
     def clear(self, model_id: str) -> None:
-        h = self._handles.pop(model_id, None)
-        if h is not None:
+        for h in self._handles.pop(model_id, ()):
             try:
                 keyboard.remove_hotkey(h)
             except Exception:

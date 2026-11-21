@@ -1,6 +1,6 @@
 # Thin STT
 
-A thin Windows wrapper for local speech-to-text. Press a hotkey in **any app**, speak, press again — the transcript is typed (or pasted) where your cursor is.
+A thin Windows wrapper for local speech-to-text. **Hold** a hotkey in **any app**, speak, release — the transcript is typed where your cursor is.
 
 Models run fully local via [onnx-asr](https://github.com/istupakov/onnx-asr) (ONNX Runtime, CPU — no PyTorch, no cloud).
 
@@ -10,7 +10,7 @@ Models run fully local via [onnx-asr](https://github.com/istupakov/onnx-asr) (ON
 - **NVIDIA Parakeet** (ONNX): CTC, RNN-T, TDT v2 (EN), TDT v3 (multilingual)
 - Per-model **Download** / **Delete** buttons (models live in the Hugging Face cache)
 - **Assignable global hotkeys** per model — click the shortcut field, press your combo
-- Works from any app: hotkey → speak → hotkey → text inserted via Ctrl+V, keystrokes, or clipboard
+- Works from any app: hold hotkey → speak → release → text is typed out as keystrokes (Ctrl+V paste or clipboard-only also available in Settings)
 - Settings: microphone choice, insert mode, model cache location, **"Completely delete this app"** (removes models, settings, and the app folder)
 - Minimizes to the system tray; hotkeys stay active
 
@@ -37,8 +37,8 @@ or double-click `run.bat`.
 
 1. **Models tab** — click **Download** on a model (small ones like Whisper Tiny are ~150 MB, Parakeet ~2.4 GB).
 2. Click the shortcut field on that row and press a combo (e.g. `Ctrl+Alt+1`).
-3. Focus any app (Notepad, browser, IDE), press the combo, speak, press it again.
-4. The transcript is pasted/typed into the focused app.
+3. Focus any app (Notepad, browser, IDE), **hold** the combo, speak, release.
+4. The transcript is typed into the focused app.
 
 Requires a working microphone (Windows audio service must be running).
 

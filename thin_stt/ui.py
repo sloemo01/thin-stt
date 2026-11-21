@@ -110,7 +110,7 @@ class RecordingOverlay(QWidget):
 
     def show_recording(self, model_label: str):
         self._label.setStyleSheet(self._CSS.format(c="#ff5555"))
-        self._label.setText(f"● Recording — {model_label}  (press hotkey again)")
+        self._label.setText(f"● Recording — {model_label}  (release hotkey to type)")
         self._place()
 
     def show_transcribing(self):
@@ -193,7 +193,8 @@ class ModelRow(QWidget):
 
 
 class MainWindow(QMainWindow):
-    hotkey_triggered = Signal(str)
+    hotkey_pressed = Signal(str)
+    hotkey_released = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -203,7 +204,7 @@ class MainWindow(QMainWindow):
         self.recorder = None
         self.recording_model = None
         self.transcriber = engines.Transcriber()
-        self.hk = hotkeys.HotkeyManager(self._hk_cb)
+        self.hk = hotkeys.HotkeyManager(self._hk_press, self._hk_release)
         self.overlay = RecordingOverlay()
         self.rows: dict[str, ModelRow] = {}
         self._workers: list[Worker] = []
@@ -214,7 +215,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(tabs)
 
         self.statusBar().showMessage("Ready")
-        self.hotkey_triggered.connect(self.toggle_recording)
+        self.hotkey_pressed.connect(self._hotkey_pressed)
+        self.hotkey_released.connect(self._hotkey_released)
         self._apply_hotkeys()
         self._refresh_rows()
         self._setup_tray()
@@ -237,7 +239,7 @@ class MainWindow(QMainWindow):
     def _build_models_tab(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        hint = QLabel("Hotkey works from any app: press → speak → press again → text is typed.")
+        hint = QLabel("Hold your hotkey in any app, speak, release — the text is typed where your cursor is.")
         hint.setObjectName("muted")
         v.addWidget(hint)
         scroll = QScrollArea()
@@ -347,8 +349,20 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Deleted {m.label}", 5000)
 
     # ---------- hotkeys ----------
-    def _hk_cb(self, model_id: str):
-        self.hotkey_triggered.emit(model_id)
+    def _hk_press(self, model_id: str):
+        self.hotkey_pressed.emit(model_id)
+
+    def _hk_release(self, model_id: str):
+        self.hotkey_released.emit(model_id)
+
+    def _hotkey_pressed(self, model_id: str):
+        if self.recorder is not None and self.recorder.recording:
+            return  # already recording — wait for release
+        self._start_recording(model_id)
+
+    def _hotkey_released(self, model_id: str):
+        if self.recorder is not None and self.recorder.recording:
+            self._stop_and_transcribe()
 
     def _apply_hotkeys(self):
         self.hk.clear_all()
@@ -369,10 +383,14 @@ class MainWindow(QMainWindow):
 
     # ---------- record / transcribe ----------
     def toggle_recording(self, model_id: str):
-        m = models.BY_ID[model_id]
+        # manual ● button: click to start, click again to stop
         if self.recorder is not None and self.recorder.recording:
             self._stop_and_transcribe()
             return
+        self._start_recording(model_id)
+
+    def _start_recording(self, model_id: str):
+        m = models.BY_ID[model_id]
         if not models.is_downloaded(m):
             self.statusBar().showMessage(f"{m.label} is not downloaded yet", 5000)
             return
