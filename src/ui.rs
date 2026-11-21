@@ -226,26 +226,26 @@ impl ThinSttView {
             .child(controls)
     }
 
-    fn render_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    fn render_capture(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let m = self.capturing_for.clone().unwrap_or_default();
 
         // Bare modifiers produce no key events — watch flags changes and
         // assign whatever modifier set is currently held.
         let view = cx.entity();
-        window.on_modifiers_changed(move |ev, _w, cx| {
-            if let Some(spec) = hotkeys::from_modifiers(&ev.modifiers) {
-                let _ = view.update(cx, |v, vc| {
-                    if let Some(id) = v.capturing_for.take() {
-                        actions::set_hotkey(&id, &spec);
-                    }
-                    vc.notify();
-                });
-            }
-        });
         div()
             .id("capture")
             .track_focus(&self.focus)
             .focusable()
+            .on_modifiers_changed(move |ev, _w, cx| {
+                if let Some(spec) = hotkeys::from_modifiers(&ev.modifiers) {
+                    let _ = view.update(cx, |v, vc| {
+                        if let Some(id) = v.capturing_for.take() {
+                            actions::set_hotkey(&id, &spec);
+                        }
+                        vc.notify();
+                    });
+                }
+            })
             .on_key_down(cx.listener(|v, e: &KeyDownEvent, _w, cx| {
                 let key = e.keystroke.key.to_lowercase();
                 if key == "escape" || key == "esc" {
