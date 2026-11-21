@@ -26,7 +26,7 @@ One-liner — paste into Terminal:
 curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/main/install.sh | sh
 ```
 
-Downloads the source, builds it with cargo, assembles `Thin STT.app` (ad-hoc signed — no Developer ID needed), and drops it in `~/Applications`. Requires Xcode Command Line Tools (`xcode-select --install`); rustup is installed automatically if cargo is missing.
+Downloads the source, builds it with cargo, assembles `Thin STT.app`, and drops it in `~/Applications`. The app is signed with a **local self-signed certificate** (created once in your login keychain — no Developer ID needed), which gives it a stable signing identity so macOS remembers your Microphone/Accessibility grants across rebuilds. Requires Xcode Command Line Tools (`xcode-select --install`); rustup is installed automatically if cargo is missing.
 
 On first launch macOS will ask for **Microphone** access, and for **Accessibility** access (needed to type text into other apps) — the Settings tab has a button to grant it.
 
@@ -36,6 +36,8 @@ On first launch macOS will ask for **Microphone** access, and for **Accessibilit
 cargo build --release
 ./target/release/thin-stt
 ```
+
+**Share the app:** run `sh dist.sh` — it builds, signs `Thin STT.app` with your local `Thin STT Local Signing` certificate, and writes `dist/Thin-STT.dmg` (`--zip` for a zip). On the recipient's Mac: mount, drag to Applications, then right-click → Open once (Gatekeeper shows "unidentified developer" for self-signed apps — expected).
 
 ### Windows
 
