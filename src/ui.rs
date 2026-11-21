@@ -20,6 +20,9 @@ pub struct ThinSttView {
     status: String,
     status_error: bool,
     capturing_for: Option<String>,
+    // Largest modifier set held so far during capture — committed when
+    // everything is released, so Ctrl+Option assigns as one combo.
+    capture_mods: Option<(u8, String)>,
     progress: HashMap<String, (u64, u64)>,
     mic_open: bool,
     confirm_delete: bool,
@@ -32,6 +35,7 @@ impl ThinSttView {
             status: "ready".into(),
             status_error: false,
             capturing_for: None,
+            capture_mods: None,
             progress: HashMap::new(),
             mic_open: false,
             confirm_delete: false,
@@ -117,6 +121,7 @@ impl ThinSttView {
                 ghost_btn("Set hotkey").id(SharedString::from(format!("hk-{}", mid))).on_click(
                     cx.listener(move |v, _e, window, cx| {
                         v.capturing_for = Some(mid.to_string());
+                        v.capture_mods = None;
                         window.focus(&v.focus);
                         cx.notify();
                     }),
@@ -237,19 +242,34 @@ impl ThinSttView {
             .track_focus(&self.focus)
             .focusable()
             .on_modifiers_changed(move |ev, _w, cx| {
-                if let Some(spec) = hotkeys::from_modifiers(&ev.modifiers) {
-                    let _ = view.update(cx, |v, vc| {
-                        if let Some(id) = v.capturing_for.take() {
-                            actions::set_hotkey(&id, &spec);
+                let m = &ev.modifiers;
+                let bits = (m.control as u8) + (m.alt as u8) + (m.shift as u8) + (m.platform as u8);
+                let _ = view.update(cx, |v, vc| {
+                    if v.capturing_for.is_none() {
+                        return;
+                    }
+                    if bits == 0 {
+                        if let Some((_, spec)) = v.capture_mods.take() {
+                            if let Some(id) = v.capturing_for.take() {
+                                actions::set_hotkey(&id, &spec);
+                            }
                         }
-                        vc.notify();
-                    });
-                }
+                    } else if let Some(spec) = hotkeys::from_modifiers(m) {
+                        // Keep the biggest set seen — releasing one key of a
+                        // combo fires an intermediate single-modifier event
+                        // that must not shrink the pending spec.
+                        if v.capture_mods.as_ref().map_or(true, |(b, _)| bits > *b) {
+                            v.capture_mods = Some((bits, spec));
+                        }
+                    }
+                    vc.notify();
+                });
             })
             .on_key_down(cx.listener(|v, e: &KeyDownEvent, _w, cx| {
                 let key = e.keystroke.key.to_lowercase();
                 if key == "escape" || key == "esc" {
                     v.capturing_for = None;
+                    v.capture_mods = None;
                     cx.notify();
                     return;
                 }
@@ -275,7 +295,7 @@ impl ThinSttView {
             .child(
                 div()
                     .text_color(rgb(MUTED))
-                    .child("Press the key combination (Esc to cancel)"),
+                    .child("Press the key combination — release to assign (Esc cancels)"),
             )
     }
 

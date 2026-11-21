@@ -200,26 +200,61 @@ fn notify_macos(title: &str, body: &str) {
         .output();
 }
 
-/// Remove every downloaded model + stray files. Returns bytes freed.
+/// Clear the cache only: partial downloads, stray files, and model dirs
+/// that never finished. Fully-downloaded models are kept.
 pub fn clear_model_cache() {
     let s = state::state();
     let dir = config::models_dir();
-    let mut freed: u64 = dir_size(&dir);
-    // drop in-memory engine state + cancel downloads for all models
-    let ids: Vec<String> = models::MODELS.iter().map(|m| m.id.to_string()).collect();
-    for id in &ids {
-        state::cancel_download(id);
-        s.engine.lock().unwrap().drop_model(id);
-    }
-    if dir.exists() {
-        let _ = std::fs::remove_dir_all(&dir);
+    let mut freed: u64 = 0;
+    let mut removed_any = false;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if path.is_dir() && models::by_id(&name).map_or(false, models::is_downloaded) {
+                // complete model — purge stray .part files only, keep the model
+                if let Ok(inner) = std::fs::read_dir(&path) {
+                    for ie in inner.flatten() {
+                        if ie.file_name().to_string_lossy().ends_with(".part") {
+                            if let Ok(md) = ie.metadata() {
+                                freed += md.len();
+                            }
+                            removed_any = true;
+                            let _ = std::fs::remove_file(ie.path());
+                        }
+                    }
+                }
+                continue;
+            }
+            let remove = if path.is_file() {
+                name.ends_with(".part")
+            } else if let Some(info) = models::by_id(&name) {
+                // incomplete download — the whole dir is cache
+                !models::is_downloaded(info)
+            } else {
+                true // stray folder not tied to a model
+            };
+            if !remove || is_fresh(&path) {
+                continue;
+            }
+            if let Some(info) = models::by_id(&name) {
+                state::cancel_download(info.id);
+                s.engine.lock().unwrap().drop_model(info.id);
+            }
+            freed += dir_size(&path);
+            removed_any = true;
+            if path.is_dir() {
+                let _ = std::fs::remove_dir_all(&path);
+            } else {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
     }
     state::emit(state::UiEvent::StateChanged);
-    freed = freed.max(0);
-    if freed == 0 {
-        state::status("model cache already empty");
+    if !removed_any {
+        state::status("cache already clean");
     } else {
-        state::status(format!("model cache cleared — freed {:.0} MB", freed as f64 / 1048576.0));
+        state::status(format!("cache cleared — freed {:.0} MB", freed as f64 / 1048576.0));
     }
 }
 
