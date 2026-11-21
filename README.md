@@ -1,22 +1,45 @@
 # Thin STT
 
-A thin Windows wrapper for local speech-to-text. **Hold** a hotkey in **any app**, speak, release — the transcript is typed where your cursor is.
+A thin wrapper for local speech-to-text. **Hold** a hotkey in **any app**, speak, release — the transcript is typed where your cursor is.
 
-Models run fully local via [onnx-asr](https://github.com/istupakov/onnx-asr) (ONNX Runtime, CPU — no PyTorch, no cloud).
+- **macOS**: native app written in Rust + [gpui](https://gpui.rs), inference via [transcribe-rs](https://github.com/cjpais/transcribe-rs) (whisper.cpp on Metal, Parakeet on ONNX Runtime).
+- **Windows**: Python app (`thin_stt/`), inference via [onnx-asr](https://github.com/istupakov/onnx-asr) (ONNX Runtime, CPU — no PyTorch, no cloud).
 
 ## Features
 
-- **OpenAI Whisper** (ONNX): Tiny, Base, Small, Large v3 Turbo
-- **NVIDIA Parakeet** (ONNX): CTC, RNN-T, TDT v2 (EN), TDT v3 (multilingual)
-- Per-model **Download** / **Delete** buttons (models live in the Hugging Face cache)
-- **Assignable global hotkeys** per model — click the shortcut field, press your combo
-- Works from any app: hold hotkey → speak → release → text is typed out as keystrokes (Ctrl+V paste or clipboard-only also available in Settings)
-- Settings: microphone choice, insert mode, model cache location, **"Completely delete this app"** (removes models, settings, and the app folder)
+- **OpenAI Whisper**: Tiny, Base, Small, Large v3 Turbo
+- **NVIDIA Parakeet**: TDT v2 (EN), TDT v3 (multilingual) — int8 ONNX
+- Per-model **Download** / **Delete** buttons with progress, sizes fetched from Hugging Face
+- **Assignable global hotkeys** per model — click **Set hotkey**, press your combo
+- Works from any app: hold hotkey → speak → release → text is typed out as keystrokes (⌘V paste or clipboard-only also available in Settings)
+- Settings: microphone choice, insert mode, model cache location, **"Completely delete this app"** (removes models, settings, and the app bundle)
 - Minimizes to the system tray; hotkeys stay active
+- Floating recording/transcribing overlay
 
 ## Install
 
-**One-liner** — paste into Command Prompt (`cmd`) or Run dialog (`Win+R`):
+### macOS
+
+One-liner — paste into Terminal:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/master/install.sh | sh
+```
+
+Downloads the source, builds it with cargo, assembles `Thin STT.app` (ad-hoc signed — no Developer ID needed), and drops it in `~/Applications`. Requires Xcode Command Line Tools (`xcode-select --install`); rustup is installed automatically if cargo is missing.
+
+On first launch macOS will ask for **Microphone** access, and for **Accessibility** access (needed to type text into other apps) — the Settings tab has a button to grant it.
+
+**Manual:**
+
+```
+cargo build --release
+./target/release/thin-stt
+```
+
+### Windows
+
+One-liner — paste into Command Prompt (`cmd`) or Run dialog (`Win+R`):
 
 ```
 curl -L https://raw.githubusercontent.com/sloemo01/thin-stt/master/install.ps1 -o %TEMP%\thinstt.ps1 && powershell -ExecutionPolicy Bypass -File %TEMP%\thinstt.ps1
@@ -35,29 +58,22 @@ or double-click `run.bat`.
 
 ## Usage
 
-1. **Models tab** — click **Download** on a model (small ones like Whisper Tiny are ~150 MB, Parakeet ~2.4 GB).
-2. Click the shortcut field on that row and press a combo (e.g. `Ctrl+Alt+1`).
-3. Focus any app (Notepad, browser, IDE), **hold** the combo, speak, release.
+1. Click **Download** on a model (Whisper Tiny is ~77 MB, Parakeet ~640 MB).
+2. Click **Set hotkey** on that row and press a combo (e.g. `Ctrl+Alt+9` / `⌃⌥9`).
+3. Focus any app (Notes, browser, IDE), **hold** the combo, speak, release.
 4. The transcript is typed into the focused app.
 
-Requires a working microphone (Windows audio service must be running).
+Requires a working microphone.
 
 ## Layout
 
-| File | Purpose |
+| Path | Purpose |
 |---|---|
-| `thin_stt/models.py` | model registry + HF download/delete |
-| `thin_stt/engines.py` | onnx-asr wrapper (lazy load) |
-| `thin_stt/audio.py` | 16 kHz mic capture to WAV |
-| `thin_stt/hotkeys.py` | global hotkeys (`keyboard`) |
-| `thin_stt/typer.py` | text insertion into focused app |
-| `thin_stt/ui.py` | PySide6 window, overlay, tray, uninstall |
-| `thin_stt/config.py` | `%APPDATA%\ThinSTT\config.json` |
-
-## Uninstall
-
-Settings → **Completely delete this app**, or manually remove:
-
-- `%APPDATA%\ThinSTT` (settings + recordings)
-- `~/.cache/huggingface/hub/models--*` entries for the models
-- this folder
+| `src/` | macOS app (Rust + gpui) |
+| `src/models.rs` | model registry + HF download/delete |
+| `src/engine.rs` | transcribe-rs engine wrapper (lazy load) |
+| `src/audio.rs` | cpal mic capture, resample to 16 kHz |
+| `src/typer.rs` | keystroke / ⌘V / clipboard insertion |
+| `thin_stt/` | Windows app (Python + PySide6) |
+| `install.sh` | macOS curl installer |
+| `install.ps1` | Windows curl installer |

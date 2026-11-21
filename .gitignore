@@ -1,6 +1,5 @@
+/target
 __pycache__/
 *.pyc
-app.log
-test.wav
-dist/
-build/
+.venv/
+node_modules/
