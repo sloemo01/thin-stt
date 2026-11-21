@@ -20,13 +20,22 @@ A thin wrapper for local speech-to-text. **Hold** a hotkey in **any app**, speak
 
 ### macOS
 
-One-liner — paste into Terminal:
+**Download the prebuilt app (recommended):**
+
+```
+curl -fsSL -o Thin-STT.dmg https://github.com/sloemo01/thin-stt/releases/latest/download/Thin-STT.dmg
+hdiutil attach Thin-STT.dmg
+```
+
+Mount, drag `Thin STT.app` to Applications. Downloading through curl sets no quarantine flag, so Gatekeeper does not prompt (browser/AirDrop downloads would). Apple Silicon only; signed with the maintainer's local `Thin STT Local Signing` certificate.
+
+**Build from source** — paste into Terminal:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/sloemo01/thin-stt/main/install.sh | sh
 ```
 
-Downloads the source, builds it with cargo, assembles `Thin STT.app`, and drops it in `~/Applications`. The app is signed with a **local self-signed certificate** (created once in your login keychain — no Developer ID needed), which gives it a stable signing identity so macOS remembers your Microphone/Accessibility grants across rebuilds. Requires Xcode Command Line Tools (`xcode-select --install`); rustup is installed automatically if cargo is missing.
+Downloads the source, builds it with cargo, assembles `Thin STT.app`, and drops it in `~/Applications`. The app is signed with a **local self-signed certificate** (created once in your login keychain — no Developer ID needed), which gives it a stable signing identity so macOS remembers your Microphone/Accessibility grants across rebuilds. Requires full Xcode (gpui compiles Metal shaders — the Command Line Tools alone aren't enough); rustup is installed automatically if cargo is missing.
 
 On first launch macOS will ask for **Microphone** access, and for **Accessibility** access (needed to type text into other apps) — the Settings tab has a button to grant it.
 
@@ -37,7 +46,7 @@ cargo build --release
 ./target/release/thin-stt
 ```
 
-**Share the app:** run `sh dist.sh` — it builds, signs `Thin STT.app` with your local `Thin STT Local Signing` certificate, and writes `dist/Thin-STT.dmg` (`--zip` for a zip). On the recipient's Mac: mount, drag to Applications, then right-click → Open once (Gatekeeper shows "unidentified developer" for self-signed apps — expected).
+**Share the app:** run `sh dist.sh` — it builds, signs `Thin STT.app` with your local `Thin STT Local Signing` certificate, and writes `dist/Thin-STT.dmg` (`--zip` for a zip). If the recipient fetches it with curl the app is not quarantined and opens directly; over browser/AirDrop they'll need right-click → Open once (self-signed apps show "unidentified developer" there).
 
 ### Windows
 
