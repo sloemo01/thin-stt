@@ -1,21 +1,54 @@
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 
-/// Stored form: "ctrl+alt+9", "cmd+shift+space". Also accepts the legacy
-/// canonical form ("Control+Alt+Digit9", "CmdOrControl+Alt+KeyA").
-pub fn parse(spec: &str) -> Option<HotKey> {
+/// Modifier bit flags used for modifier-only hotkeys (no regular key).
+pub const BIT_CTRL: u8 = 1;
+pub const BIT_ALT: u8 = 2;
+pub const BIT_SHIFT: u8 = 4;
+pub const BIT_CMD: u8 = 8;
+
+/// A hotkey trigger: either a global-hotkey HotKey (key + optional mods) or a
+/// modifier-only combo watched via an NSEvent flagsChanged monitor.
+pub enum Trigger {
+    Keyed(HotKey),
+    Mods(u8),
+}
+
+/// Stored form: "ctrl+alt+9", "cmd+shift+space", or modifier-only "alt",
+/// "ctrl+alt". Also accepts the legacy canonical form
+/// ("Control+Alt+Digit9", "CmdOrControl+Alt+KeyA").
+pub fn parse(spec: &str) -> Option<Trigger> {
     let mut mods = Modifiers::empty();
+    let mut bits: u8 = 0;
     let mut key: Option<Code> = None;
     for tok in spec.split('+') {
         match normalize(tok).as_str() {
-            "ctrl" => mods |= Modifiers::CONTROL,
-            "alt" => mods |= Modifiers::ALT,
-            "shift" => mods |= Modifiers::SHIFT,
-            "cmd" => mods |= Modifiers::SUPER,
+            "ctrl" => {
+                mods |= Modifiers::CONTROL;
+                bits |= BIT_CTRL;
+            }
+            "alt" => {
+                mods |= Modifiers::ALT;
+                bits |= BIT_ALT;
+            }
+            "shift" => {
+                mods |= Modifiers::SHIFT;
+                bits |= BIT_SHIFT;
+            }
+            "cmd" => {
+                mods |= Modifiers::SUPER;
+                bits |= BIT_CMD;
+            }
             k => key = code_for(k),
         }
     }
-    let m = if mods.is_empty() { None } else { Some(mods) };
-    Some(HotKey::new(m, key?))
+    match key {
+        Some(code) => Some(Trigger::Keyed(HotKey::new(
+            if mods.is_empty() { None } else { Some(mods) },
+            code,
+        ))),
+        None if bits != 0 => Some(Trigger::Mods(bits)),
+        None => None,
+    }
 }
 
 /// Normalize one token to the short form: modifiers -> ctrl/alt/shift/cmd,
@@ -54,7 +87,24 @@ pub fn from_gpui(ks: &gpui::Keystroke) -> Option<String> {
         return None;
     }
     let mut parts: Vec<String> = Vec::new();
-    let m = &ks.modifiers;
+    push_mods(&mut parts, &ks.modifiers);
+    parts.push(key);
+    Some(parts.join("+"))
+}
+
+/// Build a modifier-only spec ("alt", "ctrl+alt", …) from gpui modifiers.
+/// Used to capture bare modifier hotkeys, which never produce key events.
+pub fn from_modifiers(m: &gpui::Modifiers) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    push_mods(&mut parts, m);
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("+"))
+    }
+}
+
+fn push_mods(parts: &mut Vec<String>, m: &gpui::Modifiers) {
     if m.control {
         parts.push("ctrl".into());
     }
@@ -67,40 +117,54 @@ pub fn from_gpui(ks: &gpui::Keystroke) -> Option<String> {
     if m.platform {
         parts.push("cmd".into());
     }
-    parts.push(key);
-    Some(parts.join("+"))
 }
 
-/// "ctrl+alt+9" -> "⌃⌥9" (legacy "Control+Alt+Digit9" -> same)
+/// Map NSEvent modifierFlags to our bit set (ctrl=1, alt=2, shift=4, cmd=8).
+pub fn ns_flags_to_bits(flags: u64) -> u8 {
+    let mut bits = 0u8;
+    if flags & (1 << 18) != 0 {
+        bits |= BIT_CTRL;
+    }
+    if flags & (1 << 19) != 0 {
+        bits |= BIT_ALT;
+    }
+    if flags & (1 << 17) != 0 {
+        bits |= BIT_SHIFT;
+    }
+    if flags & (1 << 20) != 0 {
+        bits |= BIT_CMD;
+    }
+    bits
+}
+
+/// "ctrl+alt+9" -> "⌃⌥9"; "alt" -> "⌥"; "ctrl+alt" -> "⌃⌥"
 pub fn display(spec: &str) -> String {
     let mut out = String::new();
-    let mut tokens: Vec<String> = spec.split('+').map(normalize).collect();
-    let key = tokens.pop().unwrap_or_default();
-    let key = key.as_str();
-    for t in tokens {
-        out.push_str(match t.as_str() {
-            "ctrl" => "⌃",
-            "alt" => "⌥",
-            "shift" => "⇧",
-            "cmd" => "⌘",
-            _ => t.as_str(),
-        });
+    for t in spec.split('+').map(normalize) {
+        match t.as_str() {
+            "ctrl" => out.push_str("⌃"),
+            "alt" => out.push_str("⌥"),
+            "shift" => out.push_str("⇧"),
+            "cmd" => out.push_str("⌘"),
+            k => {
+                let s: String = match k {
+                    "space" => "Space".into(),
+                    "enter" => "↩".into(),
+                    "tab" => "⇥".into(),
+                    "escape" => "⎋".into(),
+                    "backspace" => "⌫".into(),
+                    "delete" => "⌦".into(),
+                    "up" => "↑".into(),
+                    "down" => "↓".into(),
+                    "left" => "←".into(),
+                    "right" => "→".into(),
+                    k if k.len() == 1 => k.to_uppercase(),
+                    k => k.to_string(),
+                };
+                out.push_str(&s);
+            }
+        }
     }
-    let upper = key.to_uppercase();
-    out.push_str(match key {
-        "space" => "Space",
-        "enter" => "↩",
-        "tab" => "⇥",
-        "escape" => "⎋",
-        "backspace" => "⌫",
-        "delete" => "⌦",
-        "up" | "arrowup" => "↑",
-        "down" | "arrowdown" => "↓",
-        "left" | "arrowleft" => "←",
-        "right" | "arrowright" => "→",
-        k if k.len() == 1 => upper.as_str(),
-        k => k,
-    });
     out
 }
 

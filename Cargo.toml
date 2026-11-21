@@ -24,6 +24,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 muda = "0.17"
 cocoa = "0.26"
 objc = "0.2"
+block = "0.1"
 raw-window-handle = "0.6"
 log = "0.4"
 env_logger = "0.11"
