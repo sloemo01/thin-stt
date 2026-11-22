@@ -401,6 +401,7 @@ fn setup_tray() {
         .with_menu(Box::new(menu))
         .with_tooltip("Thin STT")
         .with_icon(icon)
+        .with_icon_as_template(true)
         .build();
     match tray {
         Ok(t) => std::mem::forget(t), // live for the app lifetime
