@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod actions;
 mod audio;
 mod config;
@@ -11,7 +14,7 @@ mod typer;
 mod ui;
 
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::*;
 use objc::{msg_send, sel, sel_impl};
@@ -417,6 +420,7 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
     let mut overlay: Option<WindowHandle<OverlayView>> = None;
     // The active mic capture — !Send, owned by the pump on the main thread.
     let mut recorder: Option<audio::Recorder> = None;
+    let mut last_trim = Instant::now();
     loop {
         while let Ok(ev) = global_hotkey::GlobalHotKeyEvent::receiver().try_recv() {
             match ev.state {
@@ -483,6 +487,14 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                     let _ = cx.update(|cx| cx.quit());
                 }
             }
+        }
+        // Idle memory sweep: while nothing is recording, hand cached
+        // allocator pages back to the OS roughly every 15s.
+        if recorder.is_none()
+            && last_trim.elapsed() >= Duration::from_secs(15)
+        {
+            trim_memory();
+            last_trim = Instant::now();
         }
         cx.background_executor().timer(Duration::from_millis(30)).await;
     }

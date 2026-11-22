@@ -555,8 +555,14 @@ impl ThinSttView {
                         .text_color(rgb(if polish_now { 0xffffff } else { MUTED }))
                         .cursor_pointer()
                         .child(if polish_now { "On" } else { "Off" })
-                        .on_click(cx.listener(|_v, _e, _w, cx| {
-                            actions::toggle_polish();
+                        .on_click(cx.listener(move |_v, _e, _w, cx| {
+                            if polish_ready {
+                                actions::toggle_polish();
+                            } else {
+                                state::status_err(
+                                    "download the Qwen3 polish model first",
+                                );
+                            }
                             cx.notify();
                         })),
                 ))

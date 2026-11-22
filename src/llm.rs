@@ -79,9 +79,11 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
 
     let mut out_tokens: Vec<llama_cpp_2::token::LlamaToken> = Vec::new();
     let mut pos = tokens.len() as i32;
+    let mut finished = false;
     for _ in 0..MAX_NEW_TOKENS {
         let t = sampler.sample(&ctx, -1);
         if vocab.is_eog(t) {
+            finished = true;
             break;
         }
         sampler.accept(t);
@@ -90,6 +92,11 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         batch.add(t, pos, &[0], true).map_err(|e| e.to_string())?;
         pos += 1;
         ctx.decode(&mut batch).map_err(|e| e.to_string())?;
+    }
+    if !finished {
+        // Ran out of budget — a half-cleaned transcript is worse than
+        // the raw one, so fail and let the caller type the original.
+        return Err("polish hit token limit".into());
     }
 
     let out = vocab.detokenize(&out_tokens, false, true);
