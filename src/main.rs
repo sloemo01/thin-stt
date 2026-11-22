@@ -51,15 +51,6 @@ fn main() {
         }
         actions::fetch_remote_sizes();
         actions::sweep_recordings();
-        // Warm the engines for any model with a hotkey so the first
-        // dictation doesn't pay the model load after key release.
-        std::thread::spawn(|| {
-            let ids: Vec<String> = state().cfg.lock().unwrap().hotkeys.keys().cloned().collect();
-            let mut eng = state().engine.lock().unwrap();
-            for id in ids {
-                eng.preload(&id);
-            }
-        });
         setup_tray();
         open_main_window(cx);
 

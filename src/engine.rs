@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use transcribe_rs::onnx::parakeet::ParakeetModel;
@@ -8,36 +7,18 @@ use transcribe_rs::{SpeechModel, TranscribeOptions};
 
 use crate::models;
 
-pub struct Engine {
-    loaded: HashMap<String, Box<dyn SpeechModel>>,
-}
+pub struct Engine;
 
 impl Engine {
     pub fn new() -> Self {
-        Engine {
-            loaded: HashMap::new(),
-        }
-    }
-
-    /// Load the model now if downloaded, so the first dictation doesn't
-    /// pay the load after key release. No-op when absent or already warm.
-    pub fn preload(&mut self, model_id: &str) {
-        let downloaded = models::by_id(model_id).map_or(false, models::is_downloaded);
-        if downloaded && !self.loaded.contains_key(model_id) {
-            if let Ok(m) = load_model(model_id) {
-                self.loaded.insert(model_id.to_string(), m);
-            }
-        }
+        Engine
     }
 
     /// Transcribe 16kHz mono f32 samples with the given model id.
-    /// Loads the model on first use and keeps it warm.
+    /// The model is loaded for this call and dropped on return, so a
+    /// model only occupies RAM while it is actively transcribing.
     pub fn transcribe(&mut self, model_id: &str, samples: &[f32]) -> Result<String, String> {
-        self.preload(model_id);
-        let model = self
-            .loaded
-            .get_mut(model_id)
-            .ok_or_else(|| "model not loaded".to_string())?;
+        let mut model = load_model(model_id)?;
         // Pin the language: auto-detect on short clips mis-fires badly
         // (English speech comes back as Welsh/German). Single-language
         // engines ignore the hint.
@@ -50,11 +31,6 @@ impl Engine {
             .map_err(|e| format!("{:?}", e))?;
         Ok(result.text.trim().to_string())
     }
-
-    pub fn drop_model(&mut self, model_id: &str) {
-        self.loaded.remove(model_id);
-    }
-
 }
 
 fn load_model(model_id: &str) -> Result<Box<dyn SpeechModel>, String> {

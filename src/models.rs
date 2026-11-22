@@ -8,6 +8,7 @@ pub struct ModelInfo {
     pub label: &'static str,
     pub badge: &'static str,
     pub engine: &'static str, // "whisper" | "parakeet"
+    pub desc: &'static str,   // one-line speed/accuracy hint shown in the UI
     pub repo: &'static str,
     pub files: &'static [(&'static str, &'static str)], // (remote path, local name)
 }
@@ -25,6 +26,7 @@ pub const MODELS: &[ModelInfo] = &[
         label: "Whisper Tiny",
         badge: "GGML • 75MB",
         engine: "whisper",
+        desc: "Fastest · lighter accuracy",
         repo: "ggerganov/whisper.cpp",
         files: &[("ggml-tiny.bin", "ggml-tiny.bin")],
     },
@@ -33,6 +35,7 @@ pub const MODELS: &[ModelInfo] = &[
         label: "Whisper Base",
         badge: "GGML • 142MB",
         engine: "whisper",
+        desc: "Fast · lighter accuracy",
         repo: "ggerganov/whisper.cpp",
         files: &[("ggml-base.bin", "ggml-base.bin")],
     },
@@ -41,6 +44,7 @@ pub const MODELS: &[ModelInfo] = &[
         label: "Whisper Small",
         badge: "GGML • 466MB",
         engine: "whisper",
+        desc: "Balanced speed and accuracy",
         repo: "ggerganov/whisper.cpp",
         files: &[("ggml-small.bin", "ggml-small.bin")],
     },
@@ -49,6 +53,7 @@ pub const MODELS: &[ModelInfo] = &[
         label: "Whisper Large v3 Turbo",
         badge: "GGML • 1.6GB",
         engine: "whisper",
+        desc: "Best Whisper accuracy · heavier",
         repo: "ggerganov/whisper.cpp",
         files: &[("ggml-large-v3-turbo.bin", "ggml-large-v3-turbo.bin")],
     },
@@ -57,6 +62,7 @@ pub const MODELS: &[ModelInfo] = &[
         label: "Parakeet TDT v2",
         badge: "ONNX • 632MB",
         engine: "parakeet",
+        desc: "Very fast · English only",
         repo: "istupakov/parakeet-tdt-0.6b-v2-onnx",
         files: PARAKEET_FILES,
     },
@@ -65,6 +71,7 @@ pub const MODELS: &[ModelInfo] = &[
         label: "Parakeet TDT v3",
         badge: "ONNX • 641MB",
         engine: "parakeet",
+        desc: "Very fast · best Parakeet accuracy · English only",
         repo: "istupakov/parakeet-tdt-0.6b-v3-onnx",
         files: PARAKEET_FILES,
     },
