@@ -93,7 +93,9 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
     let vocab = model.vocab();
     let tokens = vocab.tokenize(prompt.as_bytes(), true, true);
     let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(4096));
+        .with_n_ctx(NonZeroU32::new(4096))
+        // n_batch defaults to 2048; decoding a >2048-token prompt batch asserts.
+        .with_n_batch(4096);
     let mut ctx = model
         .new_context(backend(), ctx_params)
         .map_err(|e| e.to_string())?;
