@@ -429,6 +429,9 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                         });
                     });
                 }
+                UiEvent::Quit => {
+                    let _ = cx.update(|cx| cx.quit());
+                }
             }
         }
         cx.background_executor().timer(Duration::from_millis(30)).await;

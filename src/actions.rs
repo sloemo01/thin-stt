@@ -164,8 +164,10 @@ pub fn check_for_updates() {
                     "Update available (build {}) — you have build {}",
                     remote, local
                 );
+                *state::state().update_available.lock().unwrap() = Some(msg.clone());
                 notify_macos("Thin STT", &msg);
                 state::status(msg);
+                state::emit(state::UiEvent::StateChanged);
             } else {
                 state::status(format!("up to date (build {})", local));
             }
@@ -196,8 +198,10 @@ pub fn check_for_updates() {
                 let current = semver_of(env!("CARGO_PKG_VERSION"));
                 if latest > current {
                     let msg = format!("Update available: {} (you have v{})", tag, env!("CARGO_PKG_VERSION"));
+                    *state::state().update_available.lock().unwrap() = Some(msg.clone());
                     notify_macos("Thin STT", &msg);
                     state::status(msg);
+                    state::emit(state::UiEvent::StateChanged);
                 } else {
                     state::status(format!("up to date (v{})", env!("CARGO_PKG_VERSION")));
                 }
@@ -205,6 +209,93 @@ pub fn check_for_updates() {
             None => state::status_err("update check failed"),
         }
     });
+}
+
+/// Download the latest release DMG, replace /Applications/Thin STT.app
+/// and relaunch. Runs the same flow install.sh does, in-app.
+pub fn apply_update() {
+    state::status("downloading update…");
+    std::thread::spawn(|| match apply_update_inner() {
+        Ok(()) => {
+            state::status("updated — relaunching");
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            let _ = std::process::Command::new("open")
+                .arg("-n")
+                .arg("/Applications/Thin STT.app")
+                .spawn();
+            state::emit(state::UiEvent::Quit);
+        }
+        Err(e) => state::status_err(format!("update failed: {}", e)),
+    });
+}
+
+fn apply_update_inner() -> Result<(), String> {
+    let dmg_url =
+        "https://github.com/sloemo01/thin-stt/releases/latest/download/Thin-STT.dmg";
+    let dmg = std::env::temp_dir().join("thin-stt-update.dmg");
+    {
+        let mut resp = ureq::get(dmg_url).call().map_err(|e| e.to_string())?;
+        let mut file = std::fs::File::create(&dmg).map_err(|e| e.to_string())?;
+        std::io::copy(&mut resp.body_mut().as_reader(), &mut file)
+            .map_err(|e| e.to_string())?;
+    }
+    let cleanup = |dmg: &std::path::Path| {
+        let _ = std::fs::remove_file(dmg);
+    };
+
+    // Mount the image; transient I/O flakes mean retrying a fresh mount.
+    let mut mount: Option<String> = None;
+    for _ in 0..5 {
+        let out = std::process::Command::new("hdiutil")
+            .args(["attach", "-nobrowse", "-readonly", dmg.to_str().unwrap()])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        mount = stdout
+            .lines()
+            .rev()
+            .find_map(|l| l.find("/Volumes/").map(|i| l[i..].trim().to_string()));
+        if mount.is_some() {
+            break;
+        }
+    }
+    let mount = match mount {
+        Some(m) => m,
+        None => {
+            cleanup(&dmg);
+            return Err("could not mount update image".into());
+        }
+    };
+    let src = format!("{}/Thin STT.app", mount);
+    let dst = "/Applications/Thin STT.app";
+
+    // Move the running app aside, copy the new one in, then relaunch.
+    let stale = format!("{}.old-{}", dst, std::process::id());
+    let _ = std::fs::rename(dst, &stale);
+    let copy = std::process::Command::new("ditto")
+        .args([&src, dst])
+        .status()
+        .map_err(|e| e.to_string());
+    let _ = std::process::Command::new("hdiutil")
+        .args(["detach", "-quiet", &mount])
+        .status();
+    cleanup(&dmg);
+    match copy {
+        Ok(st) if st.success() => {
+            let _ = std::fs::remove_dir_all(&stale);
+            Ok(())
+        }
+        _ => {
+            // roll back
+            let _ = std::fs::remove_dir_all(dst);
+            let _ = std::fs::rename(&stale, dst);
+            Err("copy failed".into())
+        }
+    }
 }
 
 /// Strip tag decorations like "v0.1.0-macos" down to (major, minor, patch).

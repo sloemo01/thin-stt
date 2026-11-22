@@ -16,6 +16,8 @@ pub enum UiEvent {
     OverlayHide,
     /// Download progress for one model (bytes done/total).
     DownloadProgress { id: String, done: u64, total: u64 },
+    /// Ask the app to quit (after an update is staged).
+    Quit,
 }
 
 pub struct AppState {
@@ -36,6 +38,9 @@ pub struct AppState {
     pub mod_held: Mutex<HashMap<u32, bool>>,
     /// press/release events synthesized by the flagsChanged monitor
     pub mod_events: Mutex<VecDeque<(u32, bool)>>,
+    /// Set when Check for updates found a newer build — the message shown
+    /// next to the "Update now" button.
+    pub update_available: Mutex<Option<String>>,
 }
 
 pub fn state() -> &'static Arc<AppState> {
@@ -52,6 +57,7 @@ pub fn state() -> &'static Arc<AppState> {
             mod_watch: Mutex::new(Vec::new()),
             mod_held: Mutex::new(HashMap::new()),
             mod_events: Mutex::new(VecDeque::new()),
+            update_available: Mutex::new(None),
         })
     })
 }

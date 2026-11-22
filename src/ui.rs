@@ -101,12 +101,12 @@ fn section_label(label: impl Into<SharedString>) -> gpui::Div {
         .child(label.into())
 }
 
-fn row<E: IntoElement>(label: impl Into<SharedString>, control: E) -> gpui::Div {
+fn row<L: IntoElement, E: IntoElement>(label: L, control: E) -> gpui::Div {
     div()
         .flex()
         .items_center()
         .justify_between()
-        .child(div().text_sm().child(label.into()))
+        .child(div().text_sm().child(label))
         .child(control)
 }
 
@@ -548,6 +548,7 @@ impl ThinSttView {
         // ---------- Maintenance
         wrap = wrap.child(section_label("Maintenance"));
         let mut maint = div().flex().flex_col().gap_3();
+        let update_msg = s.update_available.lock().unwrap().clone();
         maint = maint.child(row(
             "Updates",
             div()
@@ -569,6 +570,17 @@ impl ThinSttView {
                         })),
                 ),
         ));
+        if let Some(msg) = update_msg {
+            maint = maint.child(row(
+                div().text_sm().text_color(rgb(ACCENT)).child(msg),
+                pill_btn("Update now", ACCENT)
+                    .id("update-now")
+                    .on_click(cx.listener(|_v, _e, _w, cx| {
+                        actions::apply_update();
+                        cx.notify();
+                    })),
+            ));
+        }
         let cache_mb: u64 = models::MODELS
             .iter()
             .map(|m| models::disk_size_mb(m.id) as u64)
