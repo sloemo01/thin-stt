@@ -151,17 +151,24 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
 
     let out = vocab.detokenize(&out_tokens, false, true);
     let text_out = String::from_utf8_lossy(&out);
-    // Defend against template tags or reasoning leaks into the reply.
-    let cleaned = text_out
+    // Defend against template tags or reasoning leaks into the reply —
+    // and only strip a real markdown fence, never dictated backticks or
+    // dictated edge whitespace.
+    let s = text_out
         .split("<|im_end|>")
         .next()
         .unwrap_or("")
         .split("</think>")
         .last()
-        .unwrap_or("")
-        .trim()
-        .trim_matches('`')
-        .trim()
-        .to_string();
-    Ok(cleaned)
+        .unwrap_or("");
+    let cleaned = if let Some(rest) = s.strip_prefix("```") {
+        let inner = rest.splitn(2, '\n').nth(1).unwrap_or("");
+        inner
+            .strip_suffix("```")
+            .unwrap_or(inner)
+            .trim_end_matches('\n')
+    } else {
+        s.trim_matches('\n')
+    };
+    Ok(cleaned.to_string())
 }
