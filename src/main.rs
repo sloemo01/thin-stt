@@ -348,18 +348,10 @@ fn maybe_polish(text: String) -> String {
     if !s.cfg.lock().unwrap().polish {
         return text;
     }
-    let path = match models::by_id(models::POLISH_MODEL_ID) {
-        Some(i) if models::is_downloaded(i) => models::model_dir(i.id).join(i.files[0].1),
-        // A legacy polish model that's still on disk keeps working after
-        // an update swaps the default — better than silently unpolished text.
-        _ => match models::LEGACY_POLISH_MODELS
-            .iter()
-            .map(|(id, f)| models::model_dir(id).join(f))
-            .find(|p| p.exists())
-        {
-            Some(p) => p,
-            _ => return text,
-        },
+    // A legacy polish model that's still on disk keeps working after
+    // an update swaps the default — better than silently unpolished text.
+    let Some(path) = models::polish_model_path() else {
+        return text;
     };
     state::emit(UiEvent::Overlay {
         text: "Polishing…".into(),

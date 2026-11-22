@@ -436,6 +436,10 @@ pub fn cleanup_partial() -> u64 {
             } else if let Some(info) = known {
                 // incomplete download or stray .part inside
                 !models::is_downloaded(info) || has_part(&path)
+            } else if models::is_polish_dir(&name) {
+                // a legacy polish model dir — not in MODELS but still serving
+                // as the polish fallback; only sweep an interrupted download
+                has_part(&path)
             } else {
                 true // unknown folder
             };
