@@ -78,11 +78,11 @@ pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
         id: "qwen3-1.7b-polish",
         label: "Qwen3 1.7B Polish",
-        badge: "GGUF • ~730MB",
+        badge: "GGUF • ~960MB",
         engine: "llm",
         desc: "Cleans up transcripts after dictation · loads only while polishing",
         repo: "unsloth/Qwen3-1.7B-GGUF",
-        files: &[("Qwen3-1.7B-UD-IQ3_XXS.gguf", "Qwen3-1.7B-UD-IQ3_XXS.gguf")],
+        files: &[("Qwen3-1.7B-IQ4_XS.gguf", "Qwen3-1.7B-IQ4_XS.gguf")],
     },
 ];
 

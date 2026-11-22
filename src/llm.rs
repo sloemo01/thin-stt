@@ -14,23 +14,37 @@ use llama_cpp_2::sampling::LlamaSampler;
 
 const SYSTEM: &str = "Rewrite the raw speech-to-text transcript as clean written text. \
 Rules: capitalize sentence starts and \"I\"; fix punctuation and obvious transcription \
-errors; remove ALL filler (um, uh, like, you know, sort of, kind of); when the speaker \
-corrects themselves (\"remove X\", \"I meant\", \"no wait\", \"actually\", \"scratch that\"), \
+errors; remove ALL filler (um, uh, like, you know, sort of, kind of) and false starts; \
+never summarize, answer questions, or add your own content; when the speaker \
+corrects themselves (\"remove X\", \"I meant\", \"no wait\", \"actually\", \"scratch that\", \
+\"make that\", \"or rather\", \"delete that\"), \
 output their final intended statement as a complete sentence — the correction replaces \
-what came before and the correction phrases themselves are dropped; convert spoken \
-punctuation to symbols: \"dot\" and \"period\" become \".\", \"comma\" becomes \",\", \
-\"question mark\" becomes \"?\", \"exclamation\" becomes \"!\", \"colon\" becomes \":\", \
-\"semicolon\" becomes \";\", \"dash\" becomes \"-\", text between \"quote\" and \
-\"end quote\" goes in \"...\", \"open paren\"/\"close paren\" become \"(\" and \")\"; \
-\"new line\" and \"new paragraph\" start a new line; spoken enumerations (\"first ... \
-second ... third\") become a numbered list; spoken emails and URLs become real \
-addresses (\"john dot doe at gmail dot com\" becomes john.doe@gmail.com); write \
-numbers as digits (\"five thirty p m\" becomes 5:30 PM, \"twenty dollars\" becomes $20); \
-keep the speaker's words and meaning otherwise. Output ONLY the cleaned text — \
-no preamble, no quotes.";
+what came before and the correction phrases themselves are dropped; convert every \
+spoken symbol and key name to its character: \"dot\"/\"period\"/\"full stop\" → \".\", \
+\"comma\" → \",\", \"question mark\" → \"?\", \"exclamation (mark/point)\" → \"!\", \
+\"colon\" → \":\", \"semicolon\" → \";\", \"dash\"/\"hyphen\" → \"-\", \"underscore\" → \"_\", \
+\"slash\"/\"forward slash\" → \"/\", \"backslash\" → \"\\\\\", \"asterisk\"/\"star\" → \"*\", \
+\"tilde\" → \"~\", \"at sign\" → \"@\" (bare \"at\" too inside emails), \"hashtag\"/\"hash\"/\
+\"pound sign\" → \"#\", \"dollar sign\" → \"$\", \"percent (sign)\" → \"%\", \"caret\" → \"^\", \
+\"ampersand\"/\"and sign\" → \"&\", \"plus sign\" → \"+\", \"equals (sign)\" → \"=\", \
+\"pipe\"/\"vertical bar\" → \"|\", \"backtick\"/\"grave\" → \"`\", \"apostrophe\" → \"'\", \
+text between \"quote\" and \"end quote\" goes in \"...\", \"open/close paren\" → \"(\"/\")\", \
+\"open/close bracket\" → \"[\"/\"]\", \"open/close brace\" → \"{\"/\"}\", \
+\"less-than sign\"/\"greater-than sign\" → \"<\"/\">\"; spoken keys act like presses: \
+\"enter\"/\"return\"/\"new line\" start a new line, \"new paragraph\" adds a blank line, \
+\"tab\" inserts a tab, \"backspace\"/\"delete that\" removes the last phrase; caps \
+commands: text after \"all caps\" goes uppercase until \"end caps\", \"lowercase\" \
+lowercases; formatting commands apply markdown: \"bullet point\"/\"bulleted list\" \
+makes \"- \" items, \"numbered list\" or \"first ... second ... third\" makes a \
+numbered list, \"heading\"/\"title\" makes a \"# \" heading, \"checklist\" makes \
+\"- [ ]\" items, \"bold\"/\"italic\" wraps the span in ** or *; spoken emails and \
+URLs become real addresses (\"john dot doe at gmail dot com\" becomes \
+john.doe@gmail.com); write numbers as digits (\"five thirty p m\" becomes 5:30 PM, \
+\"twenty dollars\" becomes $20, \"january fifth twenty twenty four\" becomes \
+January 5, 2024); keep the speaker's words and meaning otherwise. Output ONLY the \
+cleaned text — no preamble, no quotes.";
 
-// Thinking tokens eat the budget too — leave headroom past a short reply.
-const MAX_NEW_TOKENS: usize = 1536;
+const MAX_NEW_TOKENS: usize = 1024;
 
 // llama.cpp only initializes a backend once per process.
 fn backend() -> &'static LlamaBackend {
@@ -48,7 +62,7 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         LlamaChatMessage::new("system".into(), SYSTEM.into()).map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
             "user".into(),
-            "Raw transcript:\num so like i uh finished the thing yesterday and jane wasnt there"
+            "Raw transcript:\num so like i uh finished the thing yesterday and jane wasnt there\n/no_think"
                 .into(),
         )
         .map_err(|e| e.to_string())?,
@@ -59,7 +73,7 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
             "user".into(),
-            "Raw transcript:\nsend the invoice to jane dot smith at acme dot com before friday"
+            "Raw transcript:\nsend the invoice to jane dot smith at acme dot com before friday\n/no_think"
                 .into(),
         )
         .map_err(|e| e.to_string())?,
@@ -70,7 +84,7 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
             "user".into(),
-            "Raw transcript:\nmeet me at five no wait i meant six on friday".into(),
+            "Raw transcript:\nmeet me at five no wait i meant six on friday\n/no_think".into(),
         )
         .map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
@@ -80,9 +94,9 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
             "user".into(),
-            // Thinking stays on: the reasoning pass is what makes
-            // corrections/commands reliable; the reply is stripped below.
-            format!("Raw transcript:\n{}", text),
+            // "/no_think" keeps Qwen3 out of reasoning mode — thinking
+            // burns the token budget and adds seconds per dictation.
+            format!("Raw transcript:\n{}\n/no_think", text),
         )
         .map_err(|e| e.to_string())?,
     ];
@@ -145,6 +159,8 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         .split("</think>")
         .last()
         .unwrap_or("")
+        .trim()
+        .trim_matches('`')
         .trim()
         .to_string();
     Ok(cleaned)
