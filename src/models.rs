@@ -97,6 +97,7 @@ pub const LEGACY_POLISH_MODELS: &[(&str, &str)] = &[
     ("qwen3-1.7b-polish", "Qwen3-1.7B-IQ4_XS.gguf"),
     ("lfm2-1.2b-polish", "LFM2-1.2B-Q4_K_M.gguf"),
     ("lfm25-1.2b-polish", "LFM2.5-1.2B-Instruct-Q4_K_M.gguf"),
+    ("qwen35-2b-polish", "Qwen3.5-2B-UD-IQ3_XXS.gguf"),
 ];
 
 /// Path to the GGUF that should run the polish pass: the current model when

@@ -26,6 +26,7 @@ const OVERLAY_GREEN: u32 = 0x1f8a4c;
 const OVERLAY_YELLOW: u32 = 0xb58900;
 
 fn main() {
+    tune_allocator();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     if let Some(t) = std::env::args()
@@ -110,13 +111,8 @@ fn open_main_window(cx: &mut App) {
         )
         .expect("open main window");
 
-    // Close button hides the app into the tray instead of quitting.
-    let _ = handle.update(cx, |_view, window, cx| {
-        window.on_window_should_close(cx, |_window, cx| {
-            cx.hide();
-            false
-        });
-    });
+    // Let the close button actually destroy the window: the app lives on in
+    // the tray, and the GPU surfaces + Metal state get freed instead of kept.
     cx.activate(true);
 }
 
@@ -329,10 +325,30 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
     });
 }
 
+// mimalloc v3 option ids (c_src mimalloc.h enum order). Set once at startup
+// so freed memory purges to the OS at once rather than lingering in caches.
+const MI_OPTION_PURGE_DELAY: i32 = 15; // ms of delay before purge; 0 = immediate
+const MI_OPTION_ARENA_PURGE_MULT: i32 = 24; // arena purge delay = N * purge_delay
+const MI_OPTION_GENERIC_COLLECT: i32 = 34; // collect heaps every N generic allocs
+const MI_OPTION_PAGE_FULL_RETAIN: i32 = 36; // full small pages kept per class
+const MI_OPTION_PAGE_COMMIT_ON_DEMAND: i32 = 40; // commit pages only when touched
+
+fn tune_allocator() {
+    unsafe {
+        libmimalloc_sys::mi_option_set(MI_OPTION_PURGE_DELAY, 0);
+        libmimalloc_sys::mi_option_set(MI_OPTION_ARENA_PURGE_MULT, 1);
+        libmimalloc_sys::mi_option_set(MI_OPTION_GENERIC_COLLECT, 1000);
+        libmimalloc_sys::mi_option_set(MI_OPTION_PAGE_FULL_RETAIN, 0);
+        libmimalloc_sys::mi_option_set(MI_OPTION_PAGE_COMMIT_ON_DEMAND, 1);
+    }
+}
+
 /// Return freed inference buffers to the OS. Rust's allocator keeps
 /// freed mallocs cached, so RSS stays high after a dictation without this.
 fn trim_memory() {
     unsafe {
+        // mimalloc's own purge — covers every Rust-side allocation
+        libmimalloc_sys::mi_collect(true);
         extern "C" {
             fn malloc_zone_pressure_relief(
                 zone: *mut std::ffi::c_void,
@@ -502,12 +518,10 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
 }
 
 fn selftest_polish(text: &str) {
-    let info = models::by_id(models::POLISH_MODEL_ID).unwrap();
-    if !models::is_downloaded(info) {
+    let Some(path) = models::polish_model_path() else {
         println!("polishtest: model not downloaded");
         std::process::exit(1);
-    }
-    let path = models::model_dir(info.id).join(info.files[0].1);
+    };
     match llm::polish(&path, text) {
         Ok(c) => println!("polishtest OK: {:?}", c),
         Err(e) => {
