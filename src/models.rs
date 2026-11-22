@@ -78,16 +78,21 @@ pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
         id: "qwen3-1.7b-polish",
         label: "Qwen3 1.7B Polish",
-        badge: "GGUF • ~730MB",
+        badge: "GGUF • ~960MB",
         engine: "llm",
         desc: "Cleans up transcripts after dictation · loads only while polishing",
         repo: "unsloth/Qwen3-1.7B-GGUF",
-        files: &[("Qwen3-1.7B-UD-IQ3_XXS.gguf", "Qwen3-1.7B-UD-IQ3_XXS.gguf")],
+        files: &[("Qwen3-1.7B-IQ4_XS.gguf", "Qwen3-1.7B-IQ4_XS.gguf")],
     },
 ];
 
 /// Id of the transcript-polish model (engine "llm" — no hotkey).
 pub const POLISH_MODEL_ID: &str = "qwen3-1.7b-polish";
+
+/// Earlier polish-model ids — a user who already downloaded one keeps
+/// polish working after an app update swaps in a newer model.
+/// (dir name, gguf filename)
+pub const LEGACY_POLISH_MODELS: &[(&str, &str)] = &[("qwen3-0.6b-polish", "Qwen3-0.6B-Q4_K_M.gguf")];
 
 pub fn by_id(id: &str) -> Option<&'static ModelInfo> {
     MODELS.iter().find(|m| m.id == id)
