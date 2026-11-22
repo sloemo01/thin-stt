@@ -120,6 +120,7 @@ fn card(children: gpui::Div) -> gpui::Div {
         .bg(rgb(CARD))
         .border_1()
         .border_color(rgb(BORDER))
+        .shadow_lg()
         .child(children)
 }
 
@@ -132,6 +133,7 @@ fn pill_btn(label: impl Into<SharedString>, bg: u32) -> gpui::Div {
         .text_sm()
         .text_color(rgb(0xffffff))
         .cursor_pointer()
+        .hover(|s| s.opacity(0.85))
         .child(label.into())
 }
 
@@ -145,6 +147,7 @@ fn ghost_btn(label: impl Into<SharedString>) -> gpui::Div {
         .text_sm()
         .text_color(rgb(MUTED))
         .cursor_pointer()
+        .hover(|s| s.border_color(rgb(MUTED)).text_color(rgb(FG)))
         .child(label.into())
 }
 
