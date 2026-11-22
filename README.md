@@ -12,7 +12,7 @@ A thin wrapper for local speech-to-text. **Hold** a hotkey in **any app**, speak
 - Per-model **Download** / **Delete** buttons with progress, sizes fetched from Hugging Face
 - **Assignable global hotkeys** per model — click **Set hotkey**, press your combo
 - Works from any app: hold hotkey → speak → release → text is typed out as keystrokes (⌘V paste or clipboard-only also available in Settings)
-- Optional **LLM polish**: a ~380 MB local Qwen3 model (GGUF via llama.cpp) cleans each transcript — punctuation, casing, filler removal — loading only while polishing and dropping right after
+- Optional **LLM polish**: a ~960 MB local Qwen3 model (GGUF via llama.cpp) cleans each transcript — punctuation, casing, filler removal, spoken corrections and commands — loading only while polishing and dropping right after
 - Settings: microphone choice, insert mode, LLM polish toggle, model cache location, **"Completely delete this app"** (removes models, settings, and the app bundle)
 - Minimizes to the system tray; hotkeys stay active
 - Floating recording/transcribing overlay

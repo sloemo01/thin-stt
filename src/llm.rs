@@ -14,11 +14,23 @@ use llama_cpp_2::sampling::LlamaSampler;
 
 const SYSTEM: &str = "Rewrite the raw speech-to-text transcript as clean written text. \
 Rules: capitalize sentence starts and \"I\"; fix punctuation and obvious transcription \
-errors; remove ALL filler (um, uh, like, you know, sort of, kind of); keep the \
-speaker's words and meaning otherwise. Output ONLY the cleaned text — \
+errors; remove ALL filler (um, uh, like, you know, sort of, kind of); when the speaker \
+corrects themselves (\"remove X\", \"I meant\", \"no wait\", \"actually\", \"scratch that\"), \
+output their final intended statement as a complete sentence — the correction replaces \
+what came before and the correction phrases themselves are dropped; convert spoken \
+punctuation to symbols: \"dot\" and \"period\" become \".\", \"comma\" becomes \",\", \
+\"question mark\" becomes \"?\", \"exclamation\" becomes \"!\", \"colon\" becomes \":\", \
+\"semicolon\" becomes \";\", \"dash\" becomes \"-\", text between \"quote\" and \
+\"end quote\" goes in \"...\", \"open paren\"/\"close paren\" become \"(\" and \")\"; \
+\"new line\" and \"new paragraph\" start a new line; spoken enumerations (\"first ... \
+second ... third\") become a numbered list; spoken emails and URLs become real \
+addresses (\"john dot doe at gmail dot com\" becomes john.doe@gmail.com); write \
+numbers as digits (\"five thirty p m\" becomes 5:30 PM, \"twenty dollars\" becomes $20); \
+keep the speaker's words and meaning otherwise. Output ONLY the cleaned text — \
 no preamble, no quotes.";
 
-const MAX_NEW_TOKENS: usize = 512;
+// Thinking tokens eat the budget too — leave headroom past a short reply.
+const MAX_NEW_TOKENS: usize = 1536;
 
 // llama.cpp only initializes a backend once per process.
 fn backend() -> &'static LlamaBackend {
@@ -36,7 +48,7 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         LlamaChatMessage::new("system".into(), SYSTEM.into()).map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
             "user".into(),
-            "Raw transcript:\num so like i uh finished the thing yesterday and jane wasnt there\n/no_think"
+            "Raw transcript:\num so like i uh finished the thing yesterday and jane wasnt there"
                 .into(),
         )
         .map_err(|e| e.to_string())?,
@@ -47,8 +59,30 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
             "user".into(),
-            // "/no_think" keeps Qwen3's chat template out of reasoning mode.
-            format!("Raw transcript:\n{}\n/no_think", text),
+            "Raw transcript:\nsend the invoice to jane dot smith at acme dot com before friday"
+                .into(),
+        )
+        .map_err(|e| e.to_string())?,
+        LlamaChatMessage::new(
+            "assistant".into(),
+            "Send the invoice to jane.smith@acme.com before Friday.".into(),
+        )
+        .map_err(|e| e.to_string())?,
+        LlamaChatMessage::new(
+            "user".into(),
+            "Raw transcript:\nmeet me at five no wait i meant six on friday".into(),
+        )
+        .map_err(|e| e.to_string())?,
+        LlamaChatMessage::new(
+            "assistant".into(),
+            "Meet me at six on Friday.".into(),
+        )
+        .map_err(|e| e.to_string())?,
+        LlamaChatMessage::new(
+            "user".into(),
+            // Thinking stays on: the reasoning pass is what makes
+            // corrections/commands reliable; the reply is stripped below.
+            format!("Raw transcript:\n{}", text),
         )
         .map_err(|e| e.to_string())?,
     ];
@@ -59,12 +93,12 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
     let vocab = model.vocab();
     let tokens = vocab.tokenize(prompt.as_bytes(), true, true);
     let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(2048));
+        .with_n_ctx(NonZeroU32::new(4096));
     let mut ctx = model
         .new_context(backend(), ctx_params)
         .map_err(|e| e.to_string())?;
 
-    let mut batch = LlamaBatch::new(2048, 1);
+    let mut batch = LlamaBatch::new(4096, 1);
     let last = tokens.len().saturating_sub(1);
     for (i, t) in tokens.iter().enumerate() {
         batch.add(*t, i as i32, &[0], i == last).map_err(|e| e.to_string())?;
