@@ -199,26 +199,29 @@ impl ThinSttView {
         // ---- line 2: controls
         let mut controls = div().flex().items_center().gap_2();
 
-        let hk_label = hotkey
-            .as_deref()
-            .map(|h| hotkeys::display(h))
-            .unwrap_or_else(|| "no hotkey".into());
-        controls = controls.child(
-            div()
-                .px_2()
-                .py_1()
-                .rounded_md()
-                .bg(rgb(CARD2))
-                .text_xs()
-                .text_color(if hotkey.is_some() {
-                    rgb(ACCENT)
-                } else {
-                    rgb(MUTED)
-                })
-                .child(hk_label),
-        );
         let mid: SharedString = m.id.into();
-        if downloaded {
+        // The polish model is invoked automatically — no hotkey to assign.
+        if m.engine != "llm" {
+            let hk_label = hotkey
+                .as_deref()
+                .map(|h| hotkeys::display(h))
+                .unwrap_or_else(|| "no hotkey".into());
+            controls = controls.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .bg(rgb(CARD2))
+                    .text_xs()
+                    .text_color(if hotkey.is_some() {
+                        rgb(ACCENT)
+                    } else {
+                        rgb(MUTED)
+                    })
+                    .child(hk_label),
+            );
+        }
+        if downloaded && m.engine != "llm" {
             controls = controls.child(
                 ghost_btn("Set hotkey").id(SharedString::from(format!("hk-{}", mid))).on_click(
                     cx.listener(move |v, _e, window, cx| {
@@ -527,6 +530,51 @@ impl ThinSttView {
                         .text_xs()
                         .text_color(rgb(MUTED))
                         .child("how dictated text reaches the focused app"),
+                ),
+        );
+
+        // LLM polish — only meaningful once the polish model is on disk
+        let polish_ready = models::by_id(models::POLISH_MODEL_ID)
+            .map(models::is_downloaded)
+            .unwrap_or(false);
+        let polish_now = cfg.polish && polish_ready;
+        prefs = prefs.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(row(
+                    "Polish output",
+                    div()
+                        .id("polish-toggle")
+                        .px_3()
+                        .py_1()
+                        .rounded_md()
+                        .bg(rgb(if polish_now { ACCENT } else { CARD2 }))
+                        .text_sm()
+                        .text_color(rgb(if polish_now { 0xffffff } else { MUTED }))
+                        .cursor_pointer()
+                        .child(if polish_now { "On" } else { "Off" })
+                        .on_click(cx.listener(move |_v, _e, _w, cx| {
+                            if polish_ready {
+                                actions::toggle_polish();
+                            } else {
+                                state::status_err(
+                                    "download the Qwen3 polish model first",
+                                );
+                            }
+                            cx.notify();
+                        })),
+                ))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(MUTED))
+                        .child(if polish_ready {
+                            "Qwen3 cleans each transcript; loads only while polishing"
+                        } else {
+                            "needs the Qwen3 polish model — download it in Models"
+                        }),
                 ),
         );
 

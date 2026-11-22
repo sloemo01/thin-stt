@@ -1,8 +1,12 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod actions;
 mod audio;
 mod config;
 mod engine;
 mod hotkeys;
+mod llm;
 mod models;
 mod overlay;
 mod state;
@@ -10,7 +14,7 @@ mod typer;
 mod ui;
 
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::*;
 use objc::{msg_send, sel, sel_impl};
@@ -24,6 +28,14 @@ const OVERLAY_YELLOW: u32 = 0xb58900;
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    if let Some(t) = std::env::args()
+        .nth(1)
+        .filter(|a| a == "--polish")
+        .and_then(|_| std::env::args().nth(2))
+    {
+        selftest_polish(&t);
+        return;
+    }
     if std::env::args().any(|a| a == "--selftest") {
         selftest();
         return;
@@ -228,6 +240,9 @@ fn hotkey_pressed(id: u32, recorder: &mut Option<audio::Recorder>) {
         Some(i) => i,
         None => return,
     };
+    if info.engine == "llm" {
+        return; // polish model — not a transcription engine
+    }
     if !models::is_downloaded(info) {
         state::status_err(format!("{} is not downloaded", info.label));
         return;
@@ -290,6 +305,9 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
         let res = state().engine.lock().unwrap().transcribe(&model_id, &samples);
         match res {
             Ok(text) if !text.is_empty() => {
+                // Optional local-LLM polish: the model loads for this pass
+                // and drops before we type, matching the STT engines.
+                let text = maybe_polish(text);
                 state::emit(UiEvent::OverlayHide);
                 let shown: String = text.chars().take(40).collect();
                 match typer::insert_text(&text, &mode) {
@@ -306,8 +324,43 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
                 state::status_err(format!("transcribe: {}", e));
             }
         }
+        trim_memory();
         state::emit(UiEvent::StateChanged);
     });
+}
+
+/// Return freed inference buffers to the OS. Rust's allocator keeps
+/// freed mallocs cached, so RSS stays high after a dictation without this.
+fn trim_memory() {
+    unsafe {
+        extern "C" {
+            fn malloc_zone_pressure_relief(
+                zone: *mut std::ffi::c_void,
+                goal: usize,
+            ) -> usize;
+        }
+        malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+    }
+}
+
+fn maybe_polish(text: String) -> String {
+    let s = state();
+    if !s.cfg.lock().unwrap().polish {
+        return text;
+    }
+    let info = match models::by_id(models::POLISH_MODEL_ID) {
+        Some(i) if models::is_downloaded(i) => i,
+        _ => return text,
+    };
+    state::emit(UiEvent::Overlay {
+        text: "Polishing…".into(),
+        color: OVERLAY_YELLOW,
+    });
+    let path = models::model_dir(info.id).join(info.files[0].1);
+    match llm::polish(&path, &text) {
+        Ok(cleaned) if !cleaned.is_empty() => cleaned,
+        _ => text, // polish failure must never eat the transcript
+    }
 }
 
 /// Watch global modifier changes (flagsChanged) so bare modifier hotkeys —
@@ -367,6 +420,7 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
     let mut overlay: Option<WindowHandle<OverlayView>> = None;
     // The active mic capture — !Send, owned by the pump on the main thread.
     let mut recorder: Option<audio::Recorder> = None;
+    let mut last_trim = Instant::now();
     loop {
         while let Ok(ev) = global_hotkey::GlobalHotKeyEvent::receiver().try_recv() {
             match ev.state {
@@ -434,7 +488,31 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                 }
             }
         }
+        // Idle memory sweep: while nothing is recording, hand cached
+        // allocator pages back to the OS roughly every 15s.
+        if recorder.is_none()
+            && last_trim.elapsed() >= Duration::from_secs(15)
+        {
+            trim_memory();
+            last_trim = Instant::now();
+        }
         cx.background_executor().timer(Duration::from_millis(30)).await;
+    }
+}
+
+fn selftest_polish(text: &str) {
+    let info = models::by_id(models::POLISH_MODEL_ID).unwrap();
+    if !models::is_downloaded(info) {
+        println!("polishtest: model not downloaded");
+        std::process::exit(1);
+    }
+    let path = models::model_dir(info.id).join(info.files[0].1);
+    match llm::polish(&path, text) {
+        Ok(c) => println!("polishtest OK: {:?}", c),
+        Err(e) => {
+            println!("polishtest FAILED: {}", e);
+            std::process::exit(1);
+        }
     }
 }
 

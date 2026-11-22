@@ -539,6 +539,16 @@ pub fn set_mic(name: Option<String>) {
     state::emit(state::UiEvent::StateChanged);
 }
 
+pub fn toggle_polish() {
+    let s = state::state();
+    {
+        let mut cfg = s.cfg.lock().unwrap();
+        cfg.polish = !cfg.polish;
+        let _ = config::save(&cfg);
+    }
+    state::emit(state::UiEvent::StateChanged);
+}
+
 pub fn set_paste_mode(mode: &str) {
     let s = state::state();
     {
