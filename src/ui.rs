@@ -7,14 +7,15 @@ use gpui::{
 use crate::{actions, audio, hotkeys, models, state, typer};
 
 const BG: u32 = 0x141419;
-const CARD: u32 = 0x1f1f27;
-const CARD2: u32 = 0x262630;
-const BORDER: u32 = 0x33333f;
+const CARD: u32 = 0x1e1e26;
+const CARD2: u32 = 0x2a2a35;
+const BORDER: u32 = 0x2e2e38;
 const FG: u32 = 0xe8e8ee;
 const MUTED: u32 = 0x9a9aa8;
 const ACCENT: u32 = 0x4f8cff;
 const GREEN: u32 = 0x3fb950;
 const DANGER: u32 = 0xe5484d;
+const DANGER_BG: u32 = 0x2a1d20;
 
 pub struct ThinSttView {
     status: String,
@@ -57,6 +58,71 @@ fn mb(bytes: u64) -> String {
     format!("{:.0} MB", bytes as f64 / (1024.0 * 1024.0))
 }
 
+fn dot(color: u32) -> gpui::Div {
+    div()
+        .w(px(7.))
+        .h(px(7.))
+        .rounded_full()
+        .bg(rgb(color))
+        .flex_none()
+}
+
+fn chip(label: impl Into<SharedString>) -> gpui::Div {
+    div()
+        .px_2()
+        .py(px(2.))
+        .rounded_md()
+        .bg(rgb(CARD2))
+        .text_xs()
+        .text_color(rgb(MUTED))
+        .child(label.into())
+}
+
+fn status_pill(text: impl Into<SharedString>, color: u32) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_3()
+        .py_1()
+        .rounded_full()
+        .bg(rgb(CARD))
+        .border_1()
+        .border_color(rgb(BORDER))
+        .child(dot(color))
+        .child(div().text_xs().text_color(rgb(MUTED)).child(text.into()))
+}
+
+fn section_label(label: impl Into<SharedString>) -> gpui::Div {
+    div()
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(MUTED))
+        .child(label.into())
+}
+
+fn row<E: IntoElement>(label: impl Into<SharedString>, control: E) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(div().text_sm().child(label.into()))
+        .child(control)
+}
+
+fn card(children: gpui::Div) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .p_4()
+        .rounded_lg()
+        .bg(rgb(CARD))
+        .border_1()
+        .border_color(rgb(BORDER))
+        .child(children)
+}
+
 fn pill_btn(label: impl Into<SharedString>, bg: u32) -> gpui::Div {
     div()
         .px_3()
@@ -93,10 +159,46 @@ impl ThinSttView {
         let remote_mb = cfg.remote_sizes.get(m.id).copied();
         let disk = models::disk_size_mb(m.id);
 
-        // right-hand controls
+        // ---- line 1: name + status
+        let (state_txt, state_color) = if downloading {
+            let (done, total) = self.progress.get(m.id).copied().unwrap_or((0, 0));
+            let label = if total > 0 {
+                format!("downloading {:.0}%", 100.0 * done as f32 / total as f32)
+            } else {
+                "downloading".to_string()
+            };
+            (label, ACCENT)
+        } else if downloaded {
+            ("ready".to_string(), GREEN)
+        } else {
+            ("not installed".to_string(), MUTED)
+        };
+        let mut meta = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(chip(m.badge))
+            .child(div().text_xs().text_color(rgb(MUTED)).child(m.desc));
+        meta = meta.child(
+            div()
+                .flex_1()
+                .flex()
+                .justify_end()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(dot(state_color))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(state_color))
+                        .child(state_txt),
+                ),
+        );
+
+        // ---- line 2: controls
         let mut controls = div().flex().items_center().gap_2();
 
-        // hotkey chip + assign button
         let hk_label = hotkey
             .as_deref()
             .map(|h| hotkeys::display(h))
@@ -109,7 +211,7 @@ impl ThinSttView {
                 .bg(rgb(CARD2))
                 .text_xs()
                 .text_color(if hotkey.is_some() {
-                    rgb(FG)
+                    rgb(ACCENT)
                 } else {
                     rgb(MUTED)
                 })
@@ -139,6 +241,7 @@ impl ThinSttView {
                 );
             }
         }
+        controls = controls.child(div().flex_1());
 
         if downloading {
             let (done, total) = self.progress.get(m.id).copied().unwrap_or((0, 0));
@@ -149,48 +252,49 @@ impl ThinSttView {
             };
             let mid = m.id;
             controls = controls.child(
-                div().flex().flex_col().gap_1().w(px(160.)).child(
-                    div()
-                        .w_full()
-                        .h_2()
-                        .rounded_full()
-                        .bg(rgb(CARD2))
-                        .child(
-                            div()
-                                .h_full()
-                                .rounded_full()
-                                .bg(rgb(ACCENT))
-                                .w(gpui::relative(frac)),
-                        ),
+                div().flex().items_center().gap_2().child(
+                    div().flex().flex_col().gap_1().w(px(140.)).child(
+                        div()
+                            .w_full()
+                            .h(px(6.))
+                            .rounded_full()
+                            .bg(rgb(CARD2))
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded_full()
+                                    .bg(rgb(ACCENT))
+                                    .w(gpui::relative(frac)),
+                            ),
+                    ).child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(MUTED))
+                            .child(if total > 0 {
+                                format!("{} / {}", mb(done), mb(total))
+                            } else {
+                                format!("{} downloaded", mb(done))
+                            }),
+                    ),
                 ).child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(MUTED))
-                        .child(if total > 0 {
-                            format!("{} / {}", mb(done), mb(total))
-                        } else {
-                            format!("{} downloaded", mb(done))
+                    ghost_btn("Cancel").id(SharedString::from(format!("dlc-{}", m.id))).on_click(
+                        cx.listener(move |_v, _e, _w, cx| {
+                            state::cancel_download(mid);
+                            cx.notify();
                         }),
-                ),
-            );
-            controls = controls.child(
-                ghost_btn("Cancel").id(SharedString::from(format!("dlc-{}", m.id))).on_click(
-                    cx.listener(move |_v, _e, _w, cx| {
-                        state::cancel_download(mid);
-                        cx.notify();
-                    }),
+                    ),
                 ),
             );
         } else if downloaded {
             controls = controls.child(
                 div()
                     .text_xs()
-                    .text_color(rgb(GREEN))
-                    .child(format!("ready • {:.0} MB", disk)),
+                    .text_color(rgb(MUTED))
+                    .child(format!("{:.0} MB on disk", disk)),
             );
             let mid = m.id;
             controls = controls.child(
-                pill_btn("Delete", DANGER).id(SharedString::from(format!("del-{}", m.id))).on_click(
+                ghost_btn("Delete").id(SharedString::from(format!("del-{}", m.id))).on_click(
                     cx.listener(move |_v, _e, _w, cx| {
                         actions::delete_model(mid);
                         cx.notify();
@@ -213,26 +317,35 @@ impl ThinSttView {
 
         div()
             .flex()
-            .items_center()
-            .justify_between()
-            .p_3()
+            .flex_col()
+            .gap_3()
+            .p_4()
             .rounded_lg()
             .bg(rgb(CARD))
             .border_1()
-            .border_color(rgb(BORDER))
+            // accent ring marks the model your hotkey drives
+            .border_color(rgb(if hotkey.is_some() { ACCENT } else { BORDER }))
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(m.label))
-                    .child(div().text_xs().text_color(rgb(MUTED)).child(m.badge)),
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(m.label),
+                    ),
             )
+            .child(meta)
             .child(controls)
     }
 
     fn render_capture(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let m = self.capturing_for.clone().unwrap_or_default();
+        let live = self
+            .capture_mods
+            .as_ref()
+            .map(|(_, spec)| hotkeys::display(spec));
 
         // Bare modifiers produce no key events — watch flags changes and
         // assign whatever modifier set is currently held.
@@ -289,13 +402,33 @@ impl ThinSttView {
             .bg(rgb(BG))
             .child(
                 div()
-                    .text_xl()
+                    .text_lg()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(format!("Assign hotkey — {}", m)),
             )
             .child(
                 div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .min_w(px(160.))
+                    .h(px(56.))
+                    .rounded_lg()
+                    .bg(rgb(CARD))
+                    .border_1()
+                    .border_color(rgb(ACCENT))
+                    .child(
+                        div()
+                            .text_2xl()
+                            .text_color(if live.is_some() { rgb(ACCENT) } else { rgb(MUTED) })
+                            .child(live.unwrap_or_else(|| "…".into())),
+                    ),
+            )
+            .child(
+                div()
+                    .text_sm()
                     .text_color(rgb(MUTED))
-                    .child("Press the key combination — release to assign (Esc cancels)"),
+                    .child("Press the key combination — release to assign · Esc cancels"),
             )
     }
 
@@ -306,37 +439,22 @@ impl ThinSttView {
         let mic = cfg.mic_device.clone();
         let trusted = typer::accessibility_trusted();
 
-        let mut card = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .p_3()
-            .rounded_lg()
-            .bg(rgb(CARD))
-            .border_1()
-            .border_color(rgb(BORDER))
-            .child(
-                div()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("Settings"),
-            );
+        let mut wrap = div().flex().flex_col().gap_3();
+
+        // ---------- Preferences
+        wrap = wrap.child(section_label("Preferences"));
+        let mut prefs = div().flex().flex_col().gap_3();
 
         // microphone
-        card = card.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(div().text_sm().child("Microphone"))
-                .child(
-                    ghost_btn(mic.clone().unwrap_or_else(|| "System default".into()))
-                        .id("mic-toggle")
-                        .on_click(cx.listener(|v, _e, _w, cx| {
-                            v.mic_open = !v.mic_open;
-                            cx.notify();
-                        })),
-                ),
-        );
+        prefs = prefs.child(row(
+            "Microphone",
+            ghost_btn(mic.clone().unwrap_or_else(|| "System default".into()))
+                .id("mic-toggle")
+                .on_click(cx.listener(|v, _e, _w, cx| {
+                    v.mic_open = !v.mic_open;
+                    cx.notify();
+                })),
+        ));
         if self.mic_open {
             let mut list = div().flex().flex_col().gap_1();
             let mut names = vec!["System default".to_string()];
@@ -364,172 +482,179 @@ impl ThinSttView {
                         })),
                 );
             }
-            card = card.child(list);
+            prefs = prefs.child(list);
         }
 
-        // insert mode
-        let mut modes = div().flex().gap_2();
+        // insert mode — segmented control
+        let mut segs = div()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .p(px(2.))
+            .rounded_md()
+            .bg(rgb(CARD2));
         for (id, label) in [
             ("type", "Type"),
-            ("paste", "Paste (⌘V)"),
-            ("clipboard", "Clipboard only"),
+            ("paste", "Paste"),
+            ("clipboard", "Clipboard"),
         ] {
             let active = mode == id;
-            let b = if active {
-                pill_btn(label, ACCENT)
-            } else {
-                ghost_btn(label)
-            };
-            modes = modes.child(
-                b.id(SharedString::from(format!("mode-{}", id)))
+            segs = segs.child(
+                div()
+                    .id(SharedString::from(format!("mode-{}", id)))
+                    .px_3()
+                    .py_1()
+                    .rounded_md()
+                    .text_sm()
+                    .cursor_pointer()
+                    .when(active, |d| d.bg(rgb(ACCENT)).text_color(rgb(0xffffff)))
+                    .when(!active, |d| d.text_color(rgb(MUTED)))
+                    .child(label)
                     .on_click(cx.listener(move |_v, _e, _w, cx| {
                         actions::set_paste_mode(id);
                         cx.notify();
                     })),
             );
         }
-        card = card.child(
+        prefs = prefs.child(
             div()
                 .flex()
-                .items_center()
-                .justify_between()
-                .child(div().text_sm().child("Insert mode"))
-                .child(modes),
-        );
-
-        // updates
-        card = card.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(div().text_sm().child("Updates"))
+                .flex_col()
+                .gap_1()
+                .child(row("Insert mode", segs))
                 .child(
                     div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(rgb(MUTED))
-                                .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
-                        )
-                        .child(
-                            ghost_btn("Check for updates")
-                                .id("check-update")
-                                .on_click(cx.listener(|_v, _e, _w, cx| {
-                                    actions::check_for_updates();
-                                    cx.notify();
-                                })),
-                        ),
+                        .text_xs()
+                        .text_color(rgb(MUTED))
+                        .child("how dictated text reaches the focused app"),
                 ),
         );
 
-        // models dir + clear cache
+        // permissions
+        let acc_btn: gpui::Div = if trusted {
+            status_pill("Accessibility granted", GREEN)
+        } else {
+            pill_btn("Enable typing access", ACCENT)
+        };
+        prefs = prefs.child(row(
+            "Permissions",
+            acc_btn.id("acc").on_click(cx.listener(|_v, _e, _w, cx| {
+                typer::request_accessibility();
+                cx.notify();
+            })),
+        ));
+        wrap = wrap.child(card(prefs));
+
+        // ---------- Maintenance
+        wrap = wrap.child(section_label("Maintenance"));
+        let mut maint = div().flex().flex_col().gap_3();
+        maint = maint.child(row(
+            "Updates",
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(MUTED))
+                        .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                )
+                .child(
+                    ghost_btn("Check for updates")
+                        .id("check-update")
+                        .on_click(cx.listener(|_v, _e, _w, cx| {
+                            actions::check_for_updates();
+                            cx.notify();
+                        })),
+                ),
+        ));
         let cache_mb: u64 = models::MODELS
             .iter()
             .map(|m| models::disk_size_mb(m.id) as u64)
             .sum();
-        card = card.child(
+        maint = maint.child(row(
+            "Model cache",
             div()
                 .flex()
                 .items_center()
-                .justify_between()
-                .child(div().text_sm().child("Model cache"))
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(MUTED))
+                        .child(format!("{} MB used", cache_mb)),
+                )
+                .child(
+                    ghost_btn("Clear cache")
+                        .id("clear-cache")
+                        .on_click(cx.listener(|_v, _e, _w, cx| {
+                            actions::clear_model_cache();
+                            cx.notify();
+                        })),
+                ),
+        ));
+        wrap = wrap.child(card(maint));
+
+        // ---------- Danger zone
+        if self.confirm_delete {
+            let confirm = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(DANGER))
+                        .child("Delete all data + the app?"),
+                )
                 .child(
                     div()
                         .flex()
-                        .items_center()
                         .gap_2()
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(rgb(MUTED))
-                                .child(format!("{} MB used", cache_mb)),
+                            pill_btn("Delete everything", DANGER)
+                                .id("uninstall-yes")
+                                .on_click(cx.listener(|_v, _e, _w, cx| {
+                                    actions::uninstall();
+                                    cx.quit();
+                                })),
                         )
                         .child(
-                            ghost_btn("Clear cache")
-                                .id("clear-cache")
-                                .on_click(cx.listener(|_v, _e, _w, cx| {
-                                    actions::clear_model_cache();
+                            ghost_btn("Cancel").id("uninstall-no").on_click(
+                                cx.listener(|v, _e, _w, cx| {
+                                    v.confirm_delete = false;
                                     cx.notify();
-                                })),
+                                }),
+                            ),
                         ),
-                ),
-        );
-
-        // accessibility
-        let acc_btn: gpui::Div = if trusted {
-            ghost_btn("Accessibility ✓")
-        } else {
-            pill_btn("Enable typing access", ACCENT)
-        };
-        card = card.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(div().text_sm().child("Permissions"))
-                .child(
-                    acc_btn.id("acc").on_click(cx.listener(|_v, _e, _w, cx| {
-                        typer::request_accessibility();
-                        cx.notify();
-                    })),
-                ),
-        );
-
-        // danger zone
-        if self.confirm_delete {
-            card = card.child(
+                );
+            wrap = wrap.child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .p_2()
-                    .rounded_md()
+                    .p_4()
+                    .rounded_lg()
+                    .bg(rgb(DANGER_BG))
                     .border_1()
                     .border_color(rgb(DANGER))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(rgb(DANGER))
-                            .child("Delete all data + the app?"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                pill_btn("Delete everything", DANGER)
-                                    .id("uninstall-yes")
-                                    .on_click(cx.listener(|_v, _e, _w, cx| {
-                                        actions::uninstall();
-                                        cx.quit();
-                                    })),
-                            )
-                            .child(
-                                ghost_btn("Cancel").id("uninstall-no").on_click(
-                                    cx.listener(|v, _e, _w, cx| {
-                                        v.confirm_delete = false;
-                                        cx.notify();
-                                    }),
-                                ),
-                            ),
-                    ),
+                    .child(confirm),
             );
         } else {
-            card = card.child(
-                ghost_btn("Completely delete this app")
-                    .id("uninstall")
-                    .on_click(cx.listener(|v, _e, _w, cx| {
-                        v.confirm_delete = true;
-                        cx.notify();
-                    })),
+            wrap = wrap.child(
+                div()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        ghost_btn("Completely delete this app")
+                            .id("uninstall")
+                            .on_click(cx.listener(|v, _e, _w, cx| {
+                                v.confirm_delete = true;
+                                cx.notify();
+                            })),
+                    ),
             );
         }
 
-        card
+        wrap
     }
 }
 
@@ -539,7 +664,18 @@ impl Render for ThinSttView {
             return self.render_capture(window, cx);
         }
 
-        let mut models_list = div().flex().flex_col().gap_2();
+        let cfg = state::state().cfg.lock().unwrap().clone();
+        let any_hotkey = cfg.hotkeys.values().next().cloned();
+        let any_downloaded = models::MODELS.iter().any(models::is_downloaded);
+        let hint = if let Some(hk) = any_hotkey {
+            format!("Hold {} to dictate — release to type at the cursor", hotkeys::display(&hk))
+        } else if any_downloaded {
+            "Set a hotkey on a model below to start dictating".to_string()
+        } else {
+            "Download a model below to start dictating".to_string()
+        };
+
+        let mut models_list = div().flex().flex_col().gap_3();
         for m in models::MODELS {
             models_list = models_list.child(self.render_model(m, cx));
         }
@@ -553,7 +689,7 @@ impl Render for ThinSttView {
             .bg(rgb(BG))
             .text_color(rgb(FG))
             .p_4()
-            .gap_4()
+            .gap_3()
             .child(
                 div()
                     .flex()
@@ -565,16 +701,16 @@ impl Render for ThinSttView {
                             .font_weight(gpui::FontWeight::BOLD)
                             .child("Thin STT"),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(if self.status_error {
-                                rgb(DANGER)
-                            } else {
-                                rgb(MUTED)
-                            })
-                            .child(self.status.clone()),
-                    ),
+                    .child(status_pill(
+                        self.status.clone(),
+                        if self.status_error { DANGER } else { GREEN },
+                    )),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(MUTED))
+                    .child(hint),
             )
             .child(models_list)
             .child(self.render_settings(cx))

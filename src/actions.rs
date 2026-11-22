@@ -45,8 +45,6 @@ pub fn start_download(model_id: &str) {
         state::state().downloads.lock().unwrap().remove(&id);
         match result {
             Ok(()) => {
-                // warm the engine so the first dictation skips the model load
-                state::state().engine.lock().unwrap().preload(&id);
                 state::status(format!("{} ready", info.label));
             }
             Err(e) => {
@@ -281,7 +279,6 @@ pub fn clear_model_cache() {
             }
             if let Some(info) = models::by_id(&name) {
                 state::cancel_download(info.id);
-                s.engine.lock().unwrap().drop_model(info.id);
             }
             freed += dir_size(&path);
             removed_any = true;
@@ -403,7 +400,6 @@ fn has_part(dir: &std::path::Path) -> bool {
 pub fn delete_model(model_id: &str) {
     let s = state::state();
     state::cancel_download(model_id);
-    s.engine.lock().unwrap().drop_model(model_id);
     let dir = models::model_dir(model_id);
     if dir.exists() {
         let _ = std::fs::remove_dir_all(&dir);
