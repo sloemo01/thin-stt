@@ -92,7 +92,12 @@ pub const POLISH_MODEL_ID: &str = "qwen3-1.7b-polish";
 /// Earlier polish-model ids — a user who already downloaded one keeps
 /// polish working after an app update swaps in a newer model.
 /// (dir name, gguf filename)
-pub const LEGACY_POLISH_MODELS: &[(&str, &str)] = &[("qwen3-0.6b-polish", "Qwen3-0.6B-Q4_K_M.gguf")];
+pub const LEGACY_POLISH_MODELS: &[(&str, &str)] = &[
+    ("qwen3-0.6b-polish", "Qwen3-0.6B-Q4_K_M.gguf"),
+    ("qwen3-1.7b-polish", "Qwen3-1.7B-IQ4_XS.gguf"),
+    ("lfm2-1.2b-polish", "LFM2-1.2B-Q4_K_M.gguf"),
+    ("lfm25-1.2b-polish", "LFM2.5-1.2B-Instruct-Q4_K_M.gguf"),
+];
 
 pub fn by_id(id: &str) -> Option<&'static ModelInfo> {
     MODELS.iter().find(|m| m.id == id)
