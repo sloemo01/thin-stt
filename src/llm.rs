@@ -14,8 +14,11 @@ use llama_cpp_2::sampling::LlamaSampler;
 
 const SYSTEM: &str = "Rewrite the raw speech-to-text transcript as clean written text. \
 Rules: capitalize sentence starts and \"I\"; fix punctuation and obvious transcription \
-errors; remove ALL filler (um, uh, like, you know, sort of, kind of); keep the \
-speaker's words and meaning otherwise. Output ONLY the cleaned text — \
+errors; remove ALL filler (um, uh, like, you know, sort of, kind of); when the speaker \
+corrects themselves (\"remove X\", \"I meant\", \"no wait\", \"actually\", \"scratch that\"), \
+output their final intended statement as a complete sentence — the correction replaces \
+what came before and the correction phrases themselves are dropped; \
+keep the speaker's words and meaning otherwise. Output ONLY the cleaned text — \
 no preamble, no quotes.";
 
 const MAX_NEW_TOKENS: usize = 512;
@@ -43,6 +46,16 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         LlamaChatMessage::new(
             "assistant".into(),
             "So I finished the thing yesterday, and Jane wasn't there.".into(),
+        )
+        .map_err(|e| e.to_string())?,
+        LlamaChatMessage::new(
+            "user".into(),
+            "Raw transcript:\nmeet me at five no wait i meant six on friday\n/no_think".into(),
+        )
+        .map_err(|e| e.to_string())?,
+        LlamaChatMessage::new(
+            "assistant".into(),
+            "Meet me at six on Friday.".into(),
         )
         .map_err(|e| e.to_string())?,
         LlamaChatMessage::new(
