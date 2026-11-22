@@ -17,6 +17,9 @@ dirs = "6"
 transcribe-rs = { version = "0.3", features = ["onnx", "whisper-cpp", "whisper-metal"] }
 llama-cpp-2 = { version = "0.1.161", features = ["metal"] }
 mimalloc = "0.1"
+# direct dep only to reach mi_option_set/mi_collect — same crate instance as
+# mimalloc's, so options tune the allocator in use
+libmimalloc-sys = { version = "0.1", features = ["extended"] }
 ort = "=2.0.0-rc.12"
 macos-accessibility-client = "0.0.2"
 global-hotkey = "0.8"

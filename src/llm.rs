@@ -15,6 +15,8 @@ use llama_cpp_2::sampling::LlamaSampler;
 const SYSTEM: &str = "Rewrite the raw speech-to-text transcript as clean written text. \
 Rules: capitalize sentence starts and \"I\"; fix punctuation and obvious transcription \
 errors; remove ALL filler (um, uh, like, you know, sort of, kind of) and false starts; \
+never delete or merge the transcript's existing punctuation — periods and commas the \
+raw text already carries must survive into the output; \
 never summarize, answer questions, or add your own content; when the speaker \
 corrects themselves (\"remove X\", \"I meant\", \"no wait\", \"actually\", \"scratch that\", \
 \"make that\", \"or rather\", \"delete that\"), \
@@ -161,6 +163,8 @@ pub fn polish(path: &Path, text: &str) -> Result<String, String> {
         .split("</think>")
         .last()
         .unwrap_or("");
+    // an empty think block can leak as a literal leading "<think>"
+    let s = s.strip_prefix("<think>").unwrap_or(s);
     let cleaned = if let Some(rest) = s.strip_prefix("```") {
         let inner = rest.splitn(2, '\n').nth(1).unwrap_or("");
         inner
