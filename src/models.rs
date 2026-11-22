@@ -92,7 +92,33 @@ pub const POLISH_MODEL_ID: &str = "qwen3-1.7b-polish";
 /// Earlier polish-model ids — a user who already downloaded one keeps
 /// polish working after an app update swaps in a newer model.
 /// (dir name, gguf filename)
-pub const LEGACY_POLISH_MODELS: &[(&str, &str)] = &[("qwen3-0.6b-polish", "Qwen3-0.6B-Q4_K_M.gguf")];
+pub const LEGACY_POLISH_MODELS: &[(&str, &str)] = &[
+    ("qwen3-0.6b-polish", "Qwen3-0.6B-Q4_K_M.gguf"),
+    ("qwen3-1.7b-polish", "Qwen3-1.7B-IQ4_XS.gguf"),
+    ("lfm2-1.2b-polish", "LFM2-1.2B-Q4_K_M.gguf"),
+    ("lfm25-1.2b-polish", "LFM2.5-1.2B-Instruct-Q4_K_M.gguf"),
+];
+
+/// Path to the GGUF that should run the polish pass: the current model when
+/// downloaded, else any legacy polish model still on disk.
+pub fn polish_model_path() -> Option<PathBuf> {
+    if let Some(i) = by_id(POLISH_MODEL_ID) {
+        if is_downloaded(i) {
+            return Some(model_dir(i.id).join(i.files[0].1));
+        }
+    }
+    LEGACY_POLISH_MODELS
+        .iter()
+        .map(|(id, f)| model_dir(id).join(f))
+        .find(|p| p.exists())
+}
+
+/// Directory names that hold polish models — current and every legacy one.
+/// Startup cleanup must treat these as known even when not in `MODELS`.
+pub fn is_polish_dir(name: &str) -> bool {
+    name == POLISH_MODEL_ID
+        || LEGACY_POLISH_MODELS.iter().any(|(id, _)| *id == name)
+}
 
 pub fn by_id(id: &str) -> Option<&'static ModelInfo> {
     MODELS.iter().find(|m| m.id == id)

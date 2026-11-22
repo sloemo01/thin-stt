@@ -536,10 +536,9 @@ impl ThinSttView {
                 ),
         );
 
-        // LLM polish — only meaningful once the polish model is on disk
-        let polish_ready = models::by_id(models::POLISH_MODEL_ID)
-            .map(models::is_downloaded)
-            .unwrap_or(false);
+        // LLM polish — only meaningful once a polish model is on disk
+        // (current, or a legacy one the fallback would still pick up)
+        let polish_ready = models::polish_model_path().is_some();
         let polish_now = cfg.polish && polish_ready;
         prefs = prefs.child(
             div()
