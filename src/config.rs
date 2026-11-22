@@ -8,6 +8,8 @@ pub struct Config {
     pub mic_device: Option<String>,
     pub paste_mode: Option<String>, // "type" | "paste" | "clipboard"
     pub remote_sizes: HashMap<String, u64>,
+    /// Run each transcript through the local LLM polish model before typing.
+    pub polish: bool,
 }
 
 pub fn app_data_dir() -> PathBuf {

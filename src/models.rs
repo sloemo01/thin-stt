@@ -75,7 +75,19 @@ pub const MODELS: &[ModelInfo] = &[
         repo: "istupakov/parakeet-tdt-0.6b-v3-onnx",
         files: PARAKEET_FILES,
     },
+    ModelInfo {
+        id: "qwen3-0.6b-polish",
+        label: "Qwen3 0.6B Polish",
+        badge: "GGUF • ~430MB",
+        engine: "llm",
+        desc: "Cleans up transcripts after dictation · loads only while polishing",
+        repo: "unsloth/Qwen3-0.6B-GGUF",
+        files: &[("Qwen3-0.6B-Q4_K_M.gguf", "Qwen3-0.6B-Q4_K_M.gguf")],
+    },
 ];
+
+/// Id of the transcript-polish model (engine "llm" — no hotkey).
+pub const POLISH_MODEL_ID: &str = "qwen3-0.6b-polish";
 
 pub fn by_id(id: &str) -> Option<&'static ModelInfo> {
     MODELS.iter().find(|m| m.id == id)

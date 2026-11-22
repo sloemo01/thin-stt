@@ -15,6 +15,7 @@ arboard = "3"
 ureq = "3"
 dirs = "6"
 transcribe-rs = { version = "0.3", features = ["onnx", "whisper-cpp", "whisper-metal"] }
+llama-cpp-2 = { version = "0.1.161", features = ["metal"] }
 ort = "=2.0.0-rc.12"
 macos-accessibility-client = "0.0.2"
 global-hotkey = "0.8"
