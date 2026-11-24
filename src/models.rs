@@ -111,9 +111,10 @@ pub const MODELS: &[ModelInfo] = &[
         label: "FLARE-LLM Lips",
         badge: "Qwen2.5-7B Q4 • 4.8GB",
         engine: "lips",
-        desc: "Highest-accuracy lip reading · 13.2% WER (LRS3) · uses FLARE Large's encoder + a 7B LLM · ~5GB RAM while decoding · CC BY-NC 4.0",
+        desc: "Highest-accuracy lip reading · 13.2% WER (LRS3) · FLARE encoder + a 7B LLM · ~5GB RAM while decoding · CC BY-NC 4.0",
         repo: "github:sloemo01/thin-stt/lips-models-v1",
         files: &[
+            ("flare_enc.int8.onnx", "flare_enc.int8.onnx"),
             ("flare_proj.int8.onnx", "flare_proj.int8.onnx"),
             ("flare_llm_lora.f16.gguf", "flare_llm_lora.f16.gguf"),
             (

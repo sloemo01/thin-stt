@@ -17,12 +17,10 @@ pub const MIN_FRAMES: usize = 10;
 
 /// Most accurate lip model on disk.
 pub fn best_model() -> Option<&'static models::ModelInfo> {
-    let flare = models::by_id(FLARE_MODEL_ID).map_or(false, models::is_downloaded);
     [FLARE_LLM_MODEL_ID, FLARE_MODEL_ID, FAST_MODEL_ID]
         .iter()
         .filter_map(|id| models::by_id(id))
-        // FLARE-LLM reuses FLARE Large's visual encoder.
-        .find(|m| models::is_downloaded(m) && (m.id != FLARE_LLM_MODEL_ID || flare))
+        .find(|m| models::is_downloaded(m))
 }
 const PATCH_HALF: f32 = 48.0;
 const CROP_PIXELS: usize = CROP * CROP;
@@ -357,7 +355,7 @@ fn flare_encode(dir: &std::path::Path, clip: &Clip) -> Result<(Vec<f32>, usize),
 /// Qwen2.5-7B + LoRA. Each stage frees its model before the next loads.
 fn flare_llm(dir: &std::path::Path, clip: &Clip) -> Result<String, String> {
     use ort::value::Tensor;
-    let (enc, t) = flare_encode(&models::model_dir(FLARE_MODEL_ID), clip)?;
+    let (enc, t) = flare_encode(dir, clip)?;
     if t == 0 {
         return Ok(String::new());
     }
