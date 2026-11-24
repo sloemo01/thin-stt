@@ -8,6 +8,7 @@ mod config;
 mod engine;
 mod hotkeys;
 mod lips;
+mod lipllm;
 mod llm;
 mod models;
 mod overlay;
@@ -839,7 +840,7 @@ fn selftest_lipfile() {
         std::fs::write(out, &clip.lips).unwrap();
         std::fs::write(format!("{}.face", out), &clip.face).unwrap();
     }
-    for id in [lips::FAST_MODEL_ID, lips::FLARE_MODEL_ID] {
+    for id in [lips::FAST_MODEL_ID, lips::FLARE_MODEL_ID, lips::FLARE_LLM_MODEL_ID] {
         if models::by_id(id).map_or(false, models::is_downloaded) {
             let t = Instant::now();
             println!("{}: {:?} ({:?})", id, lips::transcribe(id, &clip), t.elapsed());

@@ -106,6 +106,22 @@ pub const MODELS: &[ModelInfo] = &[
             ("flare_dict.txt", "flare_dict.txt"),
         ],
     },
+    ModelInfo {
+        id: "lips-flare-llm",
+        label: "FLARE-LLM Lips",
+        badge: "Qwen2.5-7B Q4 • 4.8GB",
+        engine: "lips",
+        desc: "Highest-accuracy lip reading · 13.2% WER (LRS3) · uses FLARE Large's encoder + a 7B LLM · ~5GB RAM while decoding · CC BY-NC 4.0",
+        repo: "github:sloemo01/thin-stt/lips-models-v1",
+        files: &[
+            ("flare_proj.int8.onnx", "flare_proj.int8.onnx"),
+            ("flare_llm_lora.f16.gguf", "flare_llm_lora.f16.gguf"),
+            (
+                "https://huggingface.co/mradermacher/Qwen2.5-7B-i1-GGUF/resolve/main/Qwen2.5-7B.i1-Q4_K_M.gguf",
+                "qwen2.5-7b.i1-Q4_K_M.gguf",
+            ),
+        ],
+    },
 ];
 
 /// Id of the transcript-polish model (engine "llm" — no hotkey).
@@ -204,6 +220,9 @@ pub fn remote_size_bytes(repo: &str, wanted: &[&str]) -> Option<u64> {
 }
 
 pub fn download_url(m: &ModelInfo, remote: &str) -> String {
+    if remote.starts_with("https://") {
+        return remote.to_string();
+    }
     if let Some(rel) = m.repo.strip_prefix("github:") {
         let (repo, tag) = rel.rsplit_once('/').unwrap_or((rel, "latest"));
         return format!("https://github.com/{}/releases/download/{}/{}", repo, tag, remote);

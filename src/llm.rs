@@ -49,6 +49,10 @@ cleaned text — no preamble, no quotes.";
 const MAX_NEW_TOKENS: usize = 1024;
 
 // llama.cpp only initializes a backend once per process.
+pub fn init_backend() {
+    backend();
+}
+
 fn backend() -> &'static LlamaBackend {
     static B: OnceLock<LlamaBackend> = OnceLock::new();
     B.get_or_init(|| LlamaBackend::init().expect("llama backend"))

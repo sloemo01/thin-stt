@@ -6711,6 +6711,7 @@ dependencies = [
  "image",
  "libmimalloc-sys",
  "llama-cpp-2",
+ "llama-cpp-sys-2",
  "log",
  "macos-accessibility-client",
  "mimalloc",
