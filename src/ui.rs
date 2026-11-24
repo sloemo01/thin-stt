@@ -24,10 +24,11 @@ const ON_ACCENT: u32 = 0x18181b;
 const GREEN: u32 = 0x22c55e;
 const AMBER: u32 = 0xf59e0b;
 const DANGER: u32 = 0xef4444;
-// Translucent layers so the window's glass shows through.
+// Subtle white layers over a solid black window.
 const GLASS_FILL: u32 = 0xffffff08;
 const GLASS_EDGE: u32 = 0xffffff14;
-const CONTENT_TINT: u32 = 0x09090bd0;
+const CONTENT_TINT: u32 = 0x000000ff;
+const SIDEBAR_BG: u32 = 0x0a0a0a;
 
 const SIDEBAR_W: f32 = 212.;
 const TITLEBAR_H: f32 = 52.;
@@ -438,6 +439,7 @@ impl ThinSttView {
             .flex_none()
             .w(px(SIDEBAR_W))
             .h_full()
+            .bg(rgb(SIDEBAR_BG))
             .border_r_1()
             .border_color(rgba(0xffffff12))
             .child(div().h(px(TITLEBAR_H)).flex_none())

@@ -133,8 +133,7 @@ unsafe fn dark_appearance() {
 
 fn open_main_window(cx: &mut App) {
     let bounds = Bounds::centered(None, size(px(920.0), px(660.0)), cx);
-    let handle = cx
-        .open_window(
+    cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
@@ -149,7 +148,7 @@ fn open_main_window(cx: &mut App) {
                 is_resizable: true,
                 is_minimizable: true,
                 display_id: None,
-                window_background: WindowBackgroundAppearance::Blurred,
+                window_background: WindowBackgroundAppearance::Opaque,
                 app_id: None,
                 window_min_size: Some(size(px(780.0), px(540.0))),
                 window_decorations: None,
@@ -158,32 +157,6 @@ fn open_main_window(cx: &mut App) {
             |window, cx| cx.new(|cx| ThinSttView::new(window, cx)),
         )
         .expect("open main window");
-    // Grab the NSView, then touch AppKit outside the GPUI borrow: appearance
-    // and subview changes call back into GPUI synchronously.
-    let view_ptr = handle
-        .update(cx, |_v, window, _cx| {
-            match raw_window_handle::HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
-                Ok(raw_window_handle::RawWindowHandle::AppKit(kit)) => kit.ns_view.as_ptr() as usize,
-                _ => 0,
-            }
-        })
-        .unwrap_or(0);
-    if view_ptr != 0 {
-        unsafe {
-            #[allow(deprecated)]
-            let view = view_ptr as cocoa::base::id;
-            // Glass sidebar: the full sidebar column, flush with the window
-            // edges (the window's rounded mask clips its corners).
-            let parent: cocoa::base::id = msg_send![view, superview];
-            let bounds: cocoa::foundation::NSRect = msg_send![parent, bounds];
-            let frame = cocoa::foundation::NSRect::new(
-                cocoa::foundation::NSPoint::new(0.0, 0.0),
-                cocoa::foundation::NSSize::new(ui::SIDEBAR_WIDTH as f64, bounds.size.height),
-            );
-            // NSViewHeightSizable(16) | NSViewMaxXMargin(4)
-            add_glass(view, frame, 0.0, 16 | 4);
-        }
-    }
 
     // Let the close button actually destroy the window: the app lives on in
     // the tray, and the GPU surfaces + Metal state get freed instead of kept.
