@@ -14,15 +14,15 @@ const BAR_W: f32 = 6.;
 const BAR_MIN: f32 = 6.;
 const SHIMMER_MS: u64 = 1400;
 const CAM_H: f32 = 196.;
+const CAM_R: f32 = 24.;
 
-/// The glass bubble sits inside a larger transparent window so its glow
-/// can spill out underneath.
+/// The glass bubble sits inside a slightly larger transparent window.
 pub const BUBBLE_W: f32 = 420.;
 pub const BUBBLE_H: f32 = 116.;
 pub const BUBBLE_CAM_H: f32 = 330.;
-pub const MARGIN_X: f32 = 30.;
-pub const MARGIN_TOP: f32 = 14.;
-pub const MARGIN_BOTTOM: f32 = 58.;
+pub const MARGIN_X: f32 = 12.;
+pub const MARGIN_TOP: f32 = 12.;
+pub const MARGIN_BOTTOM: f32 = 12.;
 pub fn bubble_radius(cam: bool) -> f32 {
     if cam { 34. } else { BUBBLE_H / 2. }
 }
@@ -40,15 +40,6 @@ fn siri(t: f32) -> gpui::Rgba {
 
 fn alpha(c: gpui::Rgba, a: f32) -> gpui::Hsla {
     gpui::Rgba { a, ..c }.into()
-}
-
-fn glow(color: gpui::Rgba, a: f32, blur: f32, spread: f32) -> gpui::BoxShadow {
-    gpui::BoxShadow {
-        color: alpha(color, a),
-        offset: gpui::point(px(0.), px(0.)),
-        blur_radius: px(blur),
-        spread_radius: px(spread),
-    }
 }
 
 pub struct OverlayView {
@@ -100,7 +91,7 @@ impl OverlayView {
             .relative()
             .w_full()
             .h(px(CAM_H))
-            .rounded(px(24.))
+            .rounded(px(CAM_R))
             .overflow_hidden()
             .bg(rgb(0x111113))
             .border_1()
@@ -116,7 +107,7 @@ impl OverlayView {
             (true, false) => (0xf59e0b, "Find your face"),
         };
         screen
-            .child(gpui::img(frame.clone()).size_full().object_fit(ObjectFit::Cover).opacity(if self.live { 1.0 } else { 0.45 }))
+            .child(gpui::img(frame.clone()).size_full().rounded(px(CAM_R)).object_fit(ObjectFit::Cover).opacity(if self.live { 1.0 } else { 0.45 }))
             .child(
                 div()
                     .absolute()
@@ -162,44 +153,6 @@ fn bar(h: f32, a: f32, pos: f32) -> gpui::Div {
             gpui::linear_color_stop(gpui::Hsla { h: 0., s: 0., l: 1., a }, 0.1),
             gpui::linear_color_stop(alpha(c, a), 1.),
         ))
-        .shadow(vec![glow(c, 0.55 * a, 10., 0.)])
-}
-
-/// Soft blobs of Siri light drifting along the bubble's lower edge. Their
-/// blurred shadows bleed past the glass, so the bubble glows from beneath.
-fn light(width: f32, bottom: f32, energy: f32, busy: bool) -> gpui::AnyElement {
-    let mut layer = div().absolute().left_0().top_0().size_full();
-    let n = SIRI.len();
-    let blob_w = width * 0.30;
-    for (i, &c) in SIRI.iter().enumerate() {
-        let c = rgb(c);
-        let base = (i as f32 + 0.5) / n as f32;
-        let period = if busy { 2600 } else { 5200 + 900 * i as u64 };
-        let phase = i as f32 * 0.37;
-        let swing = width * if busy { 0.22 } else { 0.12 };
-        let lo = 0.12 * width;
-        let hi = width - lo - blob_w;
-        layer = layer.child(
-            div()
-                .absolute()
-                .top(px(bottom - 24.))
-                .w(px(blob_w))
-                .h(px(22.))
-                .rounded_full()
-                .bg(alpha(c, 0.16 * energy))
-                .shadow(vec![glow(c, energy, 28., 8.)])
-                .with_animation(
-                    gpui::ElementId::NamedInteger("siri-light".into(), i as u64),
-                    Animation::new(Duration::from_millis(period)).repeat(),
-                    move |d, t| {
-                        let wave = ((t + phase) * std::f32::consts::TAU).sin();
-                        let x = (base * width - blob_w / 2. + wave * swing).clamp(lo, hi);
-                        d.left(px(x))
-                    },
-                ),
-        );
-    }
-    layer.into_any_element()
 }
 
 impl Render for OverlayView {
@@ -208,7 +161,6 @@ impl Render for OverlayView {
             self.refresh_frame(window);
         }
         let mut wave = div().flex().items_center().justify_center().gap(px(5.)).h(px(WAVE_H));
-        let now = (self.levels[LEVEL_BARS - 1] * 6.).sqrt().min(1.0);
         if self.live {
             for i in 0..WAVE_BARS {
                 let pos = i as f32 / (WAVE_BARS - 1) as f32;
@@ -241,7 +193,6 @@ impl Render for OverlayView {
                                     gpui::linear_color_stop(gpui::Hsla { h: 0., s: 0., l: 1., a }, 0.1),
                                     gpui::linear_color_stop(alpha(c, a), 1.),
                                 ))
-                                .shadow(vec![glow(c, 0.7 * crest, 12., 0.)])
                         },
                     ),
                 );
@@ -252,13 +203,13 @@ impl Render for OverlayView {
         let bh = if self.cam { BUBBLE_CAM_H } else { BUBBLE_H };
         let radius = bubble_radius(self.cam);
         // Liquid Glass sits natively behind this view; darken its top so
-        // text stays legible and let the lower half stay clear for the light.
+        // text stays legible with a clearer lower half.
         let glass = crate::glass_available();
         let shade = if glass {
             gpui::linear_gradient(
                 180.,
                 gpui::linear_color_stop(rgba(0x000000c8), 0.),
-                gpui::linear_color_stop(rgba(0x140a2a59), 1.),
+                gpui::linear_color_stop(rgba(0x0000004d), 1.),
             )
         } else {
             gpui::linear_gradient(
@@ -267,7 +218,6 @@ impl Render for OverlayView {
                 gpui::linear_color_stop(rgba(0x0b0b12f0), 1.),
             )
         };
-        let energy = if self.live { 0.45 + 0.55 * now } else { 0.8 };
         let bubble = div()
             .absolute()
             .left(px(MARGIN_X))
@@ -299,8 +249,7 @@ impl Render for OverlayView {
                         gpui::linear_color_stop(rgba(0xffffff00), 0.),
                         gpui::linear_color_stop(rgba(0xffffff59), 0.5),
                     )),
-            )
-            .child(light(BUBBLE_W, bh, energy, !self.live));
+            );
         let bubble = if self.cam { bubble.child(self.camera_view()).child(div().flex_1()) } else { bubble };
         let bubble = bubble.child(wave).child(
             div()
@@ -319,18 +268,6 @@ impl Render for OverlayView {
                 .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(model))
                 .child(div().text_size(px(12.)).text_color(rgb(0xa1a1aa)).child(self.title.clone())),
         );
-        // A wide halo under the bubble, like light pooling beneath it.
-        let halo = div()
-            .absolute()
-            .left(px(MARGIN_X + BUBBLE_W * 0.18))
-            .top(px(MARGIN_TOP + bh - 6.))
-            .w(px(BUBBLE_W * 0.64))
-            .h(px(8.))
-            .rounded_full()
-            .shadow(vec![
-                glow(siri(0.05), 0.55 * energy, 26., 4.),
-                glow(siri(0.55), 0.45 * energy, 40., 0.),
-            ]);
-        div().relative().size_full().child(halo).child(bubble)
+        div().relative().size_full().child(bubble)
     }
 }
