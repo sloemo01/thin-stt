@@ -148,7 +148,12 @@ fn download_all(info: &'static models::ModelInfo, cancel: &Arc<AtomicBool>) -> R
             }
         }
         drop(file);
-        std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+        if let Err(e) = std::fs::rename(&part, &dest) {
+            // Another instance may have finished this file and swept our part.
+            if !dest.is_file() {
+                return Err(e.to_string());
+            }
+        }
     }
     // Drop stale parts from earlier interrupted attempts, or the launch
     // sweep would later treat the finished model as incomplete.
