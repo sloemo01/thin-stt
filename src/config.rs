@@ -10,6 +10,14 @@ pub struct Config {
     pub remote_sizes: HashMap<String, u64>,
     /// Run each transcript through the local LLM polish model before typing.
     pub polish: bool,
+    /// "voice" (microphone) or "lips" (camera, silent).
+    pub input_source: Option<String>,
+}
+
+impl Config {
+    pub fn lips(&self) -> bool {
+        self.input_source.as_deref() == Some("lips")
+    }
 }
 
 pub fn app_data_dir() -> PathBuf {

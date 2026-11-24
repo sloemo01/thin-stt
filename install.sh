@@ -141,6 +141,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Thin STT records your microphone while you hold the transcription hotkey.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Thin STT reads your lips from the camera only while Lips mode is on and the hotkey is held. Frames are never saved.</string>
 </dict>
 </plist>
 PLIST

@@ -553,6 +553,16 @@ pub fn toggle_polish() {
     state::emit(state::UiEvent::StateChanged);
 }
 
+pub fn set_input_source(source: &str) {
+    let s = state::state();
+    {
+        let mut cfg = s.cfg.lock().unwrap();
+        cfg.input_source = Some(source.to_string());
+        let _ = config::save(&cfg);
+    }
+    state::emit(state::UiEvent::StateChanged);
+}
+
 pub fn set_paste_mode(mode: &str) {
     let s = state::state();
     {

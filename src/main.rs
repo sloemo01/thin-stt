@@ -3,9 +3,11 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod actions;
 mod audio;
+mod camera;
 mod config;
 mod engine;
 mod hotkeys;
+mod lips;
 mod llm;
 mod models;
 mod overlay;
@@ -24,8 +26,8 @@ use ui::ThinSttView;
 
 const OVERLAY_RECORDING: u32 = 0xff5a5f;
 const OVERLAY_BUSY: u32 = 0xf0b54a;
-const OVERLAY_W: f32 = 300.0;
-const OVERLAY_H: f32 = 52.0;
+const OVERLAY_W: f32 = 320.0;
+const OVERLAY_H: f32 = 96.0;
 
 fn main() {
     tune_allocator();
@@ -37,6 +39,13 @@ fn main() {
         .and_then(|_| std::env::args().nth(2))
     {
         selftest_polish(&t);
+        return;
+    }
+    if std::env::args().any(|a| a == "--overlay-demo") {
+        overlay_demo();
+    }
+    if std::env::args().nth(1).as_deref() == Some("--lipfile") {
+        selftest_lipfile();
         return;
     }
     if std::env::args().any(|a| a == "--selftest") {
@@ -325,6 +334,10 @@ fn hotkey_pressed(id: u32, recorder: &mut Option<audio::Recorder>) {
     if info.engine == "llm" {
         return; // polish model — not a transcription engine
     }
+    if info.engine == "lips" || s.cfg.lock().unwrap().lips() {
+        lips_pressed();
+        return;
+    }
     if !models::is_downloaded(info) {
         state::status_err(format!("{} is not downloaded", info.label));
         return;
@@ -351,6 +364,11 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
         Some(m) => m.clone(),
         None => return,
     };
+    if lips_active() {
+        let mode = s.cfg.lock().unwrap().paste_mode.clone().unwrap_or_else(|| "type".into());
+        lips_released(mode);
+        return;
+    }
     let rec = match recorder.take() {
         Some(r) => r,
         None => return,
@@ -409,6 +427,134 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
                 state::emit(UiEvent::OverlayHide);
                 state::status_err(format!("transcribe: {}", e));
             }
+        }
+        trim_memory();
+        state::emit(UiEvent::StateChanged);
+    });
+}
+
+const LIP_LEVEL_GAIN: f32 = 0.35;
+
+/// `--overlay-demo`: synthetic speech levels to preview the overlay.
+static DEMO_LEVEL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn overlay_demo() {
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(2));
+        state::emit(UiEvent::Overlay {
+            title: "Listening".into(),
+            detail: "Whisper Large v3 Turbo · release to insert".into(),
+            color: OVERLAY_RECORDING,
+            live: true,
+        });
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(8) {
+            let t = start.elapsed().as_secs_f32();
+            let syllable = (t * 9.0).sin().abs() * (t * 1.7).sin().abs();
+            let level = 0.01 + 0.15 * syllable;
+            DEMO_LEVEL.store(level.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        DEMO_LEVEL.store(0, std::sync::atomic::Ordering::Relaxed);
+        state::emit(UiEvent::Overlay {
+            title: "Transcribing".into(),
+            detail: "Whisper Large v3 Turbo".into(),
+            color: OVERLAY_BUSY,
+            live: false,
+        });
+        std::thread::sleep(Duration::from_secs(8));
+        state::emit(UiEvent::OverlayHide);
+    });
+}
+
+fn lips_pressed() {
+    let Some(model) = lips::best_model() else {
+        state::status_err("Lips mode: download a lip model on the Models page");
+        return;
+    };
+    if camera::permission() != 3 {
+        camera::request_permission(|_| state::emit(UiEvent::StateChanged));
+        state::status_err("Lips mode needs camera access");
+        return;
+    }
+    {
+        let mut live = camera::LIVE.lock().unwrap();
+        let l = live.get_or_insert_with(Default::default);
+        l.front = Some(lips::Frontend::default());
+        l.started = None;
+        l.frames = 0;
+    }
+    let mut cam = camera::CAM.lock().unwrap();
+    if cam.is_none() {
+        match camera::Camera::start() {
+            Ok(c) => *cam = Some(c),
+            Err(e) => {
+                camera::LIVE.lock().unwrap().take();
+                state::status_err(format!("camera: {}", e));
+                return;
+            }
+        }
+    }
+    state::emit(UiEvent::Overlay {
+        title: "Reading lips".into(),
+        detail: format!("{} · no audio · release to insert", model.label),
+        color: OVERLAY_RECORDING,
+        live: true,
+    });
+    state::status("Mouth your words… release to insert");
+}
+
+fn lips_active() -> bool {
+    camera::LIVE.lock().unwrap().as_ref().map_or(false, |l| l.front.is_some())
+}
+
+/// Stop capture, decode the mouth crops on a worker, insert without polish.
+fn lips_released(mode: String) {
+    let (front, previewing) = {
+        let mut live = camera::LIVE.lock().unwrap();
+        let front = live.as_mut().and_then(|l| l.front.take());
+        let previewing = live.as_ref().map_or(false, |l| l.previewing);
+        if !previewing {
+            *live = None;
+        }
+        (front, previewing)
+    };
+    if !previewing {
+        // Never drop the session while holding LIVE: stopRunning waits
+        // for the capture queue, whose callback takes that lock.
+        let cam = camera::CAM.lock().unwrap().take();
+        drop(cam);
+    }
+    let (Some(front), Some(model)) = (front, lips::best_model()) else { return };
+    state::emit(UiEvent::Overlay {
+        title: "Decoding lips".into(),
+        detail: model.label.into(),
+        color: OVERLAY_BUSY,
+        live: false,
+    });
+    std::thread::spawn(move || {
+        let faces = front.faces;
+        let clip = front.finish();
+        let frames = clip.frames();
+        let res = if faces == 0 {
+            Err("no face in view".to_string())
+        } else if frames < lips::MIN_FRAMES {
+            Err("clip too short".to_string())
+        } else {
+            lips::transcribe(model.id, &clip)
+        };
+        drop(clip);
+        state::emit(UiEvent::OverlayHide);
+        match res {
+            Ok(text) if !text.is_empty() => {
+                let shown: String = text.chars().take(40).collect();
+                match typer::insert_text(&text, &mode) {
+                    Ok(()) => state::status(format!("Inserted \"{}\"", shown)),
+                    Err(e) => state::status_err(format!("typed to clipboard (insert failed: {})", e)),
+                }
+            }
+            Ok(_) => state::status_err("couldn't read any words"),
+            Err(e) => state::status_err(format!("lips: {}", e)),
         }
         trim_memory();
         state::emit(UiEvent::StateChanged);
@@ -498,11 +644,37 @@ fn install_flags_monitor() {
     }
 }
 
+thread_local! {
+    static TRAY_SOURCE: std::cell::RefCell<Option<(muda::CheckMenuItem, muda::CheckMenuItem)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn sync_tray_source() {
+    let lips = state().cfg.lock().unwrap().lips();
+    TRAY_SOURCE.with(|t| {
+        if let Some((voice, lip)) = t.borrow().as_ref() {
+            voice.set_checked(!lips);
+            lip.set_checked(lips);
+        }
+    });
+}
+
 fn setup_tray() {
     let menu = muda::Menu::new();
     let show = muda::MenuItem::with_id("show", "Show Thin STT", true, None);
+    let lips = state().cfg.lock().unwrap().lips();
+    let voice = muda::CheckMenuItem::with_id("src-voice", "Voice — microphone", true, !lips, None);
+    let lip = muda::CheckMenuItem::with_id("src-lips", "Lips — camera, silent", true, lips, None);
     let quit = muda::MenuItem::with_id("quit", "Quit Thin STT", true, None);
-    let _ = menu.append_items(&[&show, &quit]);
+    let _ = menu.append_items(&[
+        &show,
+        &muda::PredefinedMenuItem::separator(),
+        &voice,
+        &lip,
+        &muda::PredefinedMenuItem::separator(),
+        &quit,
+    ]);
+    TRAY_SOURCE.with(|t| *t.borrow_mut() = Some((voice, lip)));
 
     let icon = load_tray_icon();
     let tray = tray_icon::TrayIconBuilder::new()
@@ -560,6 +732,8 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                 "quit" => {
                     let _ = cx.update(|cx| cx.quit());
                 }
+                "src-voice" => actions::set_input_source("voice"),
+                "src-lips" => actions::set_input_source("lips"),
                 _ => {}
             }
         }
@@ -574,6 +748,7 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                     let _ = cx.update(|cx| hide_overlay(cx, &mut overlay));
                 }
                 UiEvent::StateChanged => {
+                    sync_tray_source();
                     let _ = cx.update(|cx| notify_main(cx));
                 }
                 UiEvent::Status { text, error } => {
@@ -597,9 +772,17 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                 }
             }
         }
-        // Live mic meter for the overlay while the hotkey is held.
-        if let (Some(rec), Some(h)) = (recorder.as_ref(), overlay.as_ref()) {
-            let level = rec.level();
+        // Live meter for the overlay while the hotkey is held: mic level,
+        // or mouth openness when reading lips.
+        let lip_level = camera::LIVE
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|l| l.front.is_some())
+            .map(|l| if l.face { l.openness * LIP_LEVEL_GAIN } else { 0.0 });
+        let demo = f32::from_bits(DEMO_LEVEL.load(std::sync::atomic::Ordering::Relaxed));
+        let demo = (demo > 0.0).then_some(demo);
+        if let (Some(level), Some(h)) = (recorder.as_ref().map(|r| r.level()).or(lip_level).or(demo), overlay.as_ref()) {
             let _ = cx.update(|cx| {
                 let _ = h.update(cx, |v, _w, cx| {
                     if v.live {
@@ -654,6 +837,36 @@ fn selftest() {
         Err(e) => {
             println!("selftest FAILED: {}", e);
             std::process::exit(1);
+        }
+    }
+}
+
+/// `--lipfile <gray.raw> <w> <h> [crops.out]`: run 25 fps raw grayscale
+/// frames through Vision + the mouth-crop frontend, then the lip model.
+fn selftest_lipfile() {
+    let a: Vec<String> = std::env::args().collect();
+    let (w, h): (usize, usize) = (a[3].parse().unwrap(), a[4].parse().unwrap());
+    let raw = std::fs::read(&a[2]).expect("read frames");
+    let mut front = lips::Frontend::default();
+    for (i, f) in raw.chunks_exact(w * h).enumerate() {
+        let t = i as f64 * 0.04;
+        if !front.wants(t) {
+            continue;
+        }
+        let m = camera::detect_gray(f, w, h);
+        front.push(t, f.to_vec(), w, h, m.map(|x| x.0), m.map(|x| x.1).unwrap_or(0.0));
+    }
+    let faces = front.faces;
+    let clip = front.finish();
+    println!("frames {} faces {} crops {}", raw.len() / (w * h), faces, clip.frames());
+    if let Some(out) = a.get(5) {
+        std::fs::write(out, &clip.lips).unwrap();
+        std::fs::write(format!("{}.face", out), &clip.face).unwrap();
+    }
+    for id in [lips::FAST_MODEL_ID, lips::FLARE_MODEL_ID] {
+        if models::by_id(id).map_or(false, models::is_downloaded) {
+            let t = Instant::now();
+            println!("{}: {:?} ({:?})", id, lips::transcribe(id, &clip), t.elapsed());
         }
     }
 }
