@@ -405,7 +405,12 @@ fn overlay_demo() {
             });
             std::thread::sleep(Duration::from_secs(8));
             DEMO_CAM.store(false, std::sync::atomic::Ordering::Relaxed);
-            camera::LIVE.lock().unwrap().take();
+            let mut live = camera::LIVE.lock().unwrap();
+            // Leave a real Lips capture or framing preview alone.
+            if live.as_ref().map_or(false, |l| l.front.is_none() && !l.previewing) {
+                *live = None;
+            }
+            drop(live);
             state::emit(UiEvent::OverlayHide);
         });
         return;
