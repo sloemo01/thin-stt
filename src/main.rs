@@ -26,8 +26,8 @@ use ui::ThinSttView;
 
 const OVERLAY_RECORDING: u32 = 0xff5a5f;
 const OVERLAY_BUSY: u32 = 0xf0b54a;
-const OVERLAY_W: f32 = 300.0;
-const OVERLAY_H: f32 = 52.0;
+const OVERLAY_W: f32 = 320.0;
+const OVERLAY_H: f32 = 96.0;
 
 fn main() {
     tune_allocator();
@@ -40,6 +40,9 @@ fn main() {
     {
         selftest_polish(&t);
         return;
+    }
+    if std::env::args().any(|a| a == "--overlay-demo") {
+        overlay_demo();
     }
     if std::env::args().nth(1).as_deref() == Some("--lipfile") {
         selftest_lipfile();
@@ -432,6 +435,38 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
 
 const LIP_LEVEL_GAIN: f32 = 0.35;
 
+/// `--overlay-demo`: synthetic speech levels to preview the overlay.
+static DEMO_LEVEL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn overlay_demo() {
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(2));
+        state::emit(UiEvent::Overlay {
+            title: "Listening".into(),
+            detail: "Whisper Large v3 Turbo · release to insert".into(),
+            color: OVERLAY_RECORDING,
+            live: true,
+        });
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(8) {
+            let t = start.elapsed().as_secs_f32();
+            let syllable = (t * 9.0).sin().abs() * (t * 1.7).sin().abs();
+            let level = 0.01 + 0.15 * syllable;
+            DEMO_LEVEL.store(level.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        DEMO_LEVEL.store(0, std::sync::atomic::Ordering::Relaxed);
+        state::emit(UiEvent::Overlay {
+            title: "Transcribing".into(),
+            detail: "Whisper Large v3 Turbo".into(),
+            color: OVERLAY_BUSY,
+            live: false,
+        });
+        std::thread::sleep(Duration::from_secs(8));
+        state::emit(UiEvent::OverlayHide);
+    });
+}
+
 fn lips_pressed() {
     let Some(model) = lips::best_model() else {
         state::status_err("Lips mode: download a lip model on the Models page");
@@ -745,7 +780,9 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
             .as_ref()
             .filter(|l| l.front.is_some())
             .map(|l| if l.face { l.openness * LIP_LEVEL_GAIN } else { 0.0 });
-        if let (Some(level), Some(h)) = (recorder.as_ref().map(|r| r.level()).or(lip_level), overlay.as_ref()) {
+        let demo = f32::from_bits(DEMO_LEVEL.load(std::sync::atomic::Ordering::Relaxed));
+        let demo = (demo > 0.0).then_some(demo);
+        if let (Some(level), Some(h)) = (recorder.as_ref().map(|r| r.level()).or(lip_level).or(demo), overlay.as_ref()) {
             let _ = cx.update(|cx| {
                 let _ = h.update(cx, |v, _w, cx| {
                     if v.live {
