@@ -114,7 +114,7 @@ impl ThinSttView {
     }
 
     fn is_downloading(&self, id: &str) -> bool {
-        self.progress.contains_key(id) && state::state().downloads.lock().unwrap().contains_key(id)
+        state::state().downloads.lock().unwrap().contains_key(id)
     }
 
     fn start_capture(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -925,6 +925,8 @@ impl ThinSttView {
                                 .text_color(rgb(MUTED))
                                 .child(if total > 0 {
                                     format!("{} of {} · {:.0}%", mb(done), mb(total), frac * 100.0)
+                                } else if done == 0 {
+                                    "Starting…".to_string()
                                 } else {
                                     format!("{} downloaded", mb(done))
                                 }),

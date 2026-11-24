@@ -37,6 +37,8 @@ pub fn start_download(model_id: &str) {
         .lock()
         .unwrap()
         .insert(model_id.to_string(), cancel.clone());
+    // Show the progress row right away, before any network round trip.
+    state::emit(state::UiEvent::DownloadProgress { id: model_id.to_string(), done: 0, total: 0 });
     let model_id = model_id.to_string();
 
     std::thread::spawn(move || {
@@ -59,21 +61,25 @@ fn download_all(info: &'static models::ModelInfo, cancel: &Arc<AtomicBool>) -> R
     let dir = models::model_dir(info.id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    // total bytes across all files (HEAD each)
-    let mut total: u64 = 0;
-    for (remote, _) in info.files {
-        let url = models::download_url(info, remote);
-        if let Ok(resp) = ureq::head(&url).call() {
-            if let Some(len) = resp
-                .headers()
-                .get("content-length")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok())
-            {
-                total += len;
-            }
-        }
-    }
+    // total bytes across all files (HEAD each, in parallel)
+    let total: u64 = std::thread::scope(|sc| {
+        let heads: Vec<_> = info
+            .files
+            .iter()
+            .map(|(remote, _)| {
+                let url = models::download_url(info, remote);
+                sc.spawn(move || {
+                    ureq::head(&url).call().ok().and_then(|resp| {
+                        resp.headers()
+                            .get("content-length")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                    })
+                })
+            })
+            .collect();
+        heads.into_iter().filter_map(|h| h.join().ok().flatten()).sum()
+    });
 
     let mut done: u64 = 0;
     let mut last_emit = Instant::now();
