@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, pulsating_between, px, rgb,
+    div, prelude::*, pulsating_between, px, rgb, rgba,
     Animation, AnimationExt, Context, FontWeight, SharedString, Window,
 };
 
@@ -91,10 +91,14 @@ impl Render for OverlayView {
         }
 
         let model: SharedString = self.detail.split(" · ").next().unwrap_or("").to_string().into();
-        // Fill the whole window: macOS paints its own rounded glass behind.
+        // Solid black pill filling the window; same radius as the native backing.
         div()
             .relative()
             .size_full()
+            .rounded_full()
+            .bg(rgb(0x000000))
+            .border_1()
+            .border_color(rgba(0xffffff1f))
             .flex()
             .flex_col()
             .items_center()
