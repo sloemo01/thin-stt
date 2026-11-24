@@ -3,9 +3,11 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod actions;
 mod audio;
+mod camera;
 mod config;
 mod engine;
 mod hotkeys;
+mod lips;
 mod llm;
 mod models;
 mod overlay;
@@ -37,6 +39,10 @@ fn main() {
         .and_then(|_| std::env::args().nth(2))
     {
         selftest_polish(&t);
+        return;
+    }
+    if std::env::args().nth(1).as_deref() == Some("--lipfile") {
+        selftest_lipfile();
         return;
     }
     if std::env::args().any(|a| a == "--selftest") {
@@ -325,6 +331,10 @@ fn hotkey_pressed(id: u32, recorder: &mut Option<audio::Recorder>) {
     if info.engine == "llm" {
         return; // polish model — not a transcription engine
     }
+    if s.cfg.lock().unwrap().lips() {
+        lips_pressed();
+        return;
+    }
     if !models::is_downloaded(info) {
         state::status_err(format!("{} is not downloaded", info.label));
         return;
@@ -351,6 +361,11 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
         Some(m) => m.clone(),
         None => return,
     };
+    if lips_active() {
+        let mode = s.cfg.lock().unwrap().paste_mode.clone().unwrap_or_else(|| "type".into());
+        lips_released(mode);
+        return;
+    }
     let rec = match recorder.take() {
         Some(r) => r,
         None => return,
@@ -409,6 +424,102 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
                 state::emit(UiEvent::OverlayHide);
                 state::status_err(format!("transcribe: {}", e));
             }
+        }
+        trim_memory();
+        state::emit(UiEvent::StateChanged);
+    });
+}
+
+static LIP_CAM: std::sync::Mutex<Option<camera::Camera>> = std::sync::Mutex::new(None);
+
+fn lips_pressed() {
+    let Some(model) = lips::best_model() else {
+        state::status_err("Lips mode: download a lip model on the Models page");
+        return;
+    };
+    if camera::permission() != 3 {
+        camera::request_permission(|_| state::emit(UiEvent::StateChanged));
+        state::status_err("Lips mode needs camera access");
+        return;
+    }
+    {
+        let mut live = camera::LIVE.lock().unwrap();
+        let l = live.get_or_insert_with(Default::default);
+        l.front = Some(lips::Frontend::default());
+        l.started = None;
+        l.frames = 0;
+    }
+    let mut cam = LIP_CAM.lock().unwrap();
+    if cam.is_none() {
+        match camera::Camera::start() {
+            Ok(c) => *cam = Some(c),
+            Err(e) => {
+                camera::LIVE.lock().unwrap().take();
+                state::status_err(format!("camera: {}", e));
+                return;
+            }
+        }
+    }
+    state::emit(UiEvent::Overlay {
+        title: "Reading lips".into(),
+        detail: format!("{} · no audio · release to insert", model.label),
+        color: OVERLAY_RECORDING,
+        live: true,
+    });
+    state::status("Mouth your words… release to insert");
+}
+
+fn lips_active() -> bool {
+    camera::LIVE.lock().unwrap().as_ref().map_or(false, |l| l.front.is_some())
+}
+
+/// Stop capture, decode the mouth crops on a worker, insert without polish.
+fn lips_released(mode: String) {
+    let (front, previewing) = {
+        let mut live = camera::LIVE.lock().unwrap();
+        let front = live.as_mut().and_then(|l| l.front.take());
+        let previewing = live.as_ref().map_or(false, |l| l.previewing);
+        if !previewing {
+            *live = None;
+        }
+        (front, previewing)
+    };
+    if !previewing {
+        // Never drop the session while holding LIVE: stopRunning waits
+        // for the capture queue, whose callback takes that lock.
+        let cam = LIP_CAM.lock().unwrap().take();
+        drop(cam);
+    }
+    let (Some(front), Some(model)) = (front, lips::best_model()) else { return };
+    state::emit(UiEvent::Overlay {
+        title: "Decoding lips".into(),
+        detail: model.label.into(),
+        color: OVERLAY_BUSY,
+        live: false,
+    });
+    std::thread::spawn(move || {
+        let faces = front.faces;
+        let crops = front.finish();
+        let frames = crops.len() / (lips::CROP * lips::CROP);
+        let res = if faces == 0 {
+            Err("no face in view".to_string())
+        } else if frames < lips::MIN_FRAMES {
+            Err("clip too short".to_string())
+        } else {
+            lips::transcribe(model.id, &crops)
+        };
+        drop(crops);
+        state::emit(UiEvent::OverlayHide);
+        match res {
+            Ok(text) if !text.is_empty() => {
+                let shown: String = text.chars().take(40).collect();
+                match typer::insert_text(&text, &mode) {
+                    Ok(()) => state::status(format!("Inserted \"{}\"", shown)),
+                    Err(e) => state::status_err(format!("typed to clipboard (insert failed: {})", e)),
+                }
+            }
+            Ok(_) => state::status_err("couldn't read any words"),
+            Err(e) => state::status_err(format!("lips: {}", e)),
         }
         trim_memory();
         state::emit(UiEvent::StateChanged);
@@ -654,6 +765,35 @@ fn selftest() {
         Err(e) => {
             println!("selftest FAILED: {}", e);
             std::process::exit(1);
+        }
+    }
+}
+
+/// `--lipfile <gray.raw> <w> <h> [crops.out]`: run 25 fps raw grayscale
+/// frames through Vision + the mouth-crop frontend, then the lip model.
+fn selftest_lipfile() {
+    let a: Vec<String> = std::env::args().collect();
+    let (w, h): (usize, usize) = (a[3].parse().unwrap(), a[4].parse().unwrap());
+    let raw = std::fs::read(&a[2]).expect("read frames");
+    let mut front = lips::Frontend::default();
+    for (i, f) in raw.chunks_exact(w * h).enumerate() {
+        let t = i as f64 * 0.04;
+        if !front.wants(t) {
+            continue;
+        }
+        let m = camera::detect_gray(f, w, h);
+        front.push(t, f.to_vec(), w, h, m.map(|x| x.0), m.map(|x| x.1).unwrap_or(0.0));
+    }
+    let faces = front.faces;
+    let crops = front.finish();
+    println!("frames {} faces {} crops {}", raw.len() / (w * h), faces, crops.len() / (lips::CROP * lips::CROP));
+    if let Some(out) = a.get(5) {
+        std::fs::write(out, &crops).unwrap();
+    }
+    for id in [lips::FAST_MODEL_ID] {
+        if models::by_id(id).map_or(false, models::is_downloaded) {
+            let t = Instant::now();
+            println!("{}: {:?} ({:?})", id, lips::transcribe(id, &crops), t.elapsed());
         }
     }
 }

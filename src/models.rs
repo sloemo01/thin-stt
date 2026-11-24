@@ -84,6 +84,15 @@ pub const MODELS: &[ModelInfo] = &[
         repo: "unsloth/Qwen3-1.7B-GGUF",
         files: &[("Qwen3-1.7B-IQ4_XS.gguf", "Qwen3-1.7B-IQ4_XS.gguf")],
     },
+    ModelInfo {
+        id: "lips-fast",
+        label: "Auto-AVSR Lips (fast)",
+        badge: "ONNX • 203MB",
+        engine: "lips",
+        desc: "Silent lip reading from the camera · ~25% WER · research-only weights",
+        repo: "eschmechel/auto-avsr-lrs3-vsr-int8-onnx",
+        files: &[("lipread_ctc.int8.onnx", "lipread_ctc.int8.onnx"), ("tokens.json", "tokens.json")],
+    },
 ];
 
 /// Id of the transcript-polish model (engine "llm" — no hotkey).
