@@ -404,6 +404,8 @@ fn overlay_demo() {
                 live: false,
             });
             std::thread::sleep(Duration::from_secs(8));
+            DEMO_CAM.store(false, std::sync::atomic::Ordering::Relaxed);
+            camera::LIVE.lock().unwrap().take();
             state::emit(UiEvent::OverlayHide);
         });
         return;
