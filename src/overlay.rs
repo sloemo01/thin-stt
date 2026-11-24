@@ -80,6 +80,16 @@ impl OverlayView {
         });
         let Some((seq, h, data)) = next else { return };
         let Some(img) = image::RgbaImage::from_raw(crate::camera::PREVIEW_W as u32, h as u32, data) else { return };
+        // Crop to the tile's aspect so the image fills it exactly; with Cover
+        // the overflow would be clipped square and hide the rounded corners.
+        let (w, h) = img.dimensions();
+        let want = (BUBBLE_W - 24.) / CAM_H;
+        let (cw, ch) = if w as f32 / h as f32 > want {
+            (((h as f32 * want) as u32).max(1), h)
+        } else {
+            (w, ((w as f32 / want) as u32).max(1))
+        };
+        let img = image::imageops::crop_imm(&img, (w - cw) / 2, (h - ch) / 2, cw, ch).to_image();
         let img = Arc::new(RenderImage::new(vec![image::Frame::new(img)]));
         if let Some((_, old)) = self.frame.replace((seq, img)) {
             let _ = window.drop_image(old);
@@ -107,7 +117,7 @@ impl OverlayView {
             (true, false) => (0xf59e0b, "Find your face"),
         };
         screen
-            .child(gpui::img(frame.clone()).size_full().rounded(px(CAM_R)).object_fit(ObjectFit::Cover).opacity(if self.live { 1.0 } else { 0.45 }))
+            .child(gpui::img(frame.clone()).size_full().rounded(px(CAM_R)).object_fit(ObjectFit::Fill).opacity(if self.live { 1.0 } else { 0.45 }))
             .child(
                 div()
                     .absolute()
