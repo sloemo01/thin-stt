@@ -93,6 +93,19 @@ pub const MODELS: &[ModelInfo] = &[
         repo: "eschmechel/auto-avsr-lrs3-vsr-int8-onnx",
         files: &[("lipread_ctc.int8.onnx", "lipread_ctc.int8.onnx"), ("tokens.json", "tokens.json")],
     },
+    ModelInfo {
+        id: "lips-flare",
+        label: "FLARE Large Lips",
+        badge: "ONNX int8 • 430MB",
+        engine: "lips",
+        desc: "Most accurate silent lip reading · 15.9% WER (LRS3) · face + lip streams · CC BY-NC 4.0",
+        repo: "github:sloemo01/thin-stt/lips-models-v1",
+        files: &[
+            ("flare_enc.int8.onnx", "flare_enc.int8.onnx"),
+            ("flare_dec.int8.onnx", "flare_dec.int8.onnx"),
+            ("flare_dict.txt", "flare_dict.txt"),
+        ],
+    },
 ];
 
 /// Id of the transcript-polish model (engine "llm" — no hotkey).
@@ -166,6 +179,9 @@ pub fn disk_size_mb(id: &str) -> f64 {
 
 /// Query huggingface for the size (bytes) of just the files we download.
 pub fn remote_size_bytes(repo: &str, wanted: &[&str]) -> Option<u64> {
+    if repo.starts_with("github:") {
+        return None;
+    }
     let url = format!("https://huggingface.co/api/models/{}?blobs=true", repo);
     let body = ureq::get(&url).call().ok()?.body_mut().read_to_string().ok()?;
     let json: serde_json::Value = serde_json::from_str(&body).ok()?;
@@ -188,5 +204,9 @@ pub fn remote_size_bytes(repo: &str, wanted: &[&str]) -> Option<u64> {
 }
 
 pub fn download_url(m: &ModelInfo, remote: &str) -> String {
+    if let Some(rel) = m.repo.strip_prefix("github:") {
+        let (repo, tag) = rel.rsplit_once('/').unwrap_or((rel, "latest"));
+        return format!("https://github.com/{}/releases/download/{}/{}", repo, tag, remote);
+    }
     format!("https://huggingface.co/{}/resolve/main/{}", m.repo, remote)
 }

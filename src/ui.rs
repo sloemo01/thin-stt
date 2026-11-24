@@ -7,7 +7,7 @@ use gpui::{
     KeyDownEvent, SharedString, Window,
 };
 
-use crate::{actions, audio, config, hotkeys, models, state, typer};
+use crate::{actions, audio, camera, config, hotkeys, lips, models, state, typer};
 
 // Palette — shadcn zinc (dark) over a Liquid Glass window.
 const BG: u32 = 0x09090b;
@@ -56,6 +56,13 @@ pub struct ThinSttView {
     mic_open: bool,
     confirm_delete: bool,
     focus: FocusHandle,
+    preview_img: Option<(u64, std::sync::Arc<gpui::RenderImage>)>,
+}
+
+impl Drop for ThinSttView {
+    fn drop(&mut self) {
+        let _ = camera::set_preview(false);
+    }
 }
 
 impl ThinSttView {
@@ -72,6 +79,27 @@ impl ThinSttView {
             mic_open: false,
             confirm_delete: false,
             focus: cx.focus_handle(),
+            preview_img: None,
+        }
+    }
+
+    /// Swap in the newest camera frame; the old texture is freed at once.
+    fn refresh_preview(&mut self, window: &mut Window) {
+        if self.page != Page::Dictate && camera::previewing() {
+            let _ = camera::set_preview(false);
+        }
+        let next = camera::LIVE.lock().unwrap().as_ref().and_then(|l| {
+            let stale = self.preview_img.as_ref().map_or(true, |p| p.0 != l.preview_seq);
+            (l.previewing && !l.preview.is_empty() && stale).then(|| (l.preview_seq, l.preview_h, l.preview.clone()))
+        });
+        let replace = match next {
+            Some((seq, h, data)) => image::RgbaImage::from_raw(camera::PREVIEW_W as u32, h as u32, data)
+                .map(|img| (seq, std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(img)])))),
+            None if !camera::previewing() => None,
+            None => return,
+        };
+        if let Some((_, old)) = std::mem::replace(&mut self.preview_img, replace) {
+            let _ = window.drop_image(old);
         }
     }
 
@@ -514,10 +542,23 @@ impl ThinSttView {
         let polish_ready = models::polish_model_path().is_some();
         let polish_on = cfg.polish && polish_ready;
 
-        let mut page = div().flex().flex_col().gap(px(24.)).child(page_header(
-            "Dictate",
-            "Hold your shortcut in any app, speak, and release — the text lands at your cursor.",
-        ));
+        let lips_mode = cfg.lips();
+        let mut page = div()
+            .flex()
+            .flex_col()
+            .gap(px(24.))
+            .child(page_header(
+                "Dictate",
+                if lips_mode {
+                    "Hold your shortcut, mouth the words silently, release — the camera reads your lips."
+                } else {
+                    "Hold your shortcut in any app, speak, and release — the text lands at your cursor."
+                },
+            ))
+            .child(source_switch(lips_mode, cx));
+        if lips_mode {
+            return page.children(self.lips_panel(bound.first().map(|b| b.1.clone()), downloaded.first().map(|m| m.id), cx));
+        }
 
         // ---- hero
         let hero = div()
@@ -794,6 +835,7 @@ impl ThinSttView {
         for (title, caption, filter) in [
             ("WHISPER", "OpenAI · whisper.cpp on Metal", "whisper"),
             ("PARAKEET", "NVIDIA · ONNX Runtime", "parakeet"),
+            ("LIPS", "silent lip reading from the camera · ONNX Runtime · research-only weights", "lips"),
             ("POLISH", "optional cleanup pass · llama.cpp", "llm"),
         ] {
             let mut rows = Vec::new();
@@ -998,7 +1040,29 @@ impl ThinSttView {
 
         // ---- input
         let mic_label = cfg.mic_device.clone().unwrap_or_else(|| "System default".into());
-        let mut input_rows = vec![setting_row(
+        let cam_perm = camera::permission();
+        let mut input_rows = vec![
+            setting_row(
+                "Input source",
+                Some(
+                    if cfg.lips() {
+                        "Lips: the camera reads your mouth while the shortcut is held. No audio, no polish."
+                    } else {
+                        "Voice: the microphone records while the shortcut is held."
+                    }
+                    .into(),
+                ),
+                source_segments(cfg.lips(), cx),
+            )
+            .into_any_element(),
+            setting_row(
+                "Camera",
+                Some("Used only in Lips mode while the shortcut is held. Frames stay in memory and are never saved.".into()),
+                camera_access(cam_perm, cx),
+            )
+            .into_any_element(),
+        ];
+        input_rows.push(setting_row(
             "Microphone",
             Some("Used only while your shortcut is held. Audio never touches disk.".into()),
             btn_secondary(format!("{}  ▾", mic_label))
@@ -1008,7 +1072,7 @@ impl ThinSttView {
                     cx.notify();
                 })),
         )
-        .into_any_element()];
+        .into_any_element());
         if self.mic_open {
             let mut list = div().flex().flex_col().gap(px(2.)).px(px(10.)).py(px(8.));
             let mut names = vec!["System default".to_string()];
@@ -1761,6 +1825,340 @@ fn mode_segments(mode: &str, cx: &mut Context<ThinSttView>) -> gpui::Div {
     segs
 }
 
+const CAMERA_AUTHORIZED: i64 = 3;
+const CAMERA_NOT_DETERMINED: i64 = 0;
+
+fn source_switch(lips: bool, cx: &mut Context<ThinSttView>) -> gpui::Div {
+    let mut row = div()
+        .flex()
+        .gap(px(6.))
+        .p(px(4.))
+        .rounded(px(12.))
+        .bg(rgba(0x0000004d))
+        .border_1()
+        .border_color(rgba(GLASS_EDGE));
+    for (id, title, sub, glyph) in [
+        ("voice", "Voice", "Microphone · speak out loud", "◉"),
+        ("lips", "Lips", "Camera · silent, no audio", "◐"),
+    ] {
+        let active = (id == "lips") == lips;
+        row = row.child(
+            div()
+                .id(SharedString::from(format!("src-{}", id)))
+                .flex_1()
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .px(px(14.))
+                .py(px(10.))
+                .rounded(px(9.))
+                .border_1()
+                .cursor_pointer()
+                .when(active, |d| d.bg(rgb(SURFACE3)).border_color(rgba(0xffffff1f)).shadow_sm())
+                .when(!active, |d| d.border_color(rgba(0x00000000)).hover(|s| s.bg(rgba(0xffffff0a))))
+                .child(
+                    div()
+                        .size(px(30.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(8.))
+                        .bg(rgba(if active { 0xffffff1a } else { 0xffffff0a }))
+                        .text_size(px(15.))
+                        .text_color(rgb(if active { FG } else { SUBTLE }))
+                        .child(glyph),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(1.))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(if active { FG } else { MUTED }))
+                                .child(title),
+                        )
+                        .child(div().text_size(px(12.)).text_color(rgb(SUBTLE)).child(sub)),
+                )
+                .when(active, |d| d.child(div().flex_1()).child(dot(GREEN, 6.)))
+                .on_click(cx.listener(move |_v, _e, _w, cx| {
+                    if id == "voice" {
+                        let _ = camera::set_preview(false);
+                    }
+                    actions::set_input_source(id);
+                    cx.notify();
+                })),
+        );
+    }
+    row
+}
+
+fn source_segments(lips: bool, cx: &mut Context<ThinSttView>) -> gpui::Div {
+    let mut segs = div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .p(px(2.))
+        .rounded(px(8.))
+        .bg(rgba(0x0000004d))
+        .border_1()
+        .border_color(rgba(GLASS_EDGE));
+    for (id, label) in [("voice", "Voice"), ("lips", "Lips")] {
+        let active = (id == "lips") == lips;
+        segs = segs.child(
+            div()
+                .id(SharedString::from(format!("seg-src-{}", id)))
+                .h(px(24.))
+                .px(px(12.))
+                .flex()
+                .items_center()
+                .rounded(px(6.))
+                .text_size(px(12.))
+                .font_weight(FontWeight::MEDIUM)
+                .cursor_pointer()
+                .when(active, |d| d.bg(rgb(SURFACE3)).text_color(rgb(FG)).shadow_sm())
+                .when(!active, |d| d.text_color(rgb(MUTED)).hover(|s| s.text_color(rgb(FG))))
+                .child(label)
+                .on_click(cx.listener(move |_v, _e, _w, cx| {
+                    actions::set_input_source(id);
+                    cx.notify();
+                })),
+        );
+    }
+    segs
+}
+
+fn camera_access(perm: i64, cx: &mut Context<ThinSttView>) -> AnyElement {
+    match perm {
+        CAMERA_AUTHORIZED => tag("✓ Granted", GREEN, 0x22c55e1f).into_any_element(),
+        CAMERA_NOT_DETERMINED => btn_primary("Allow camera")
+            .id("cam-allow")
+            .on_click(cx.listener(|_v, _e, _w, cx| {
+                camera::request_permission(|_| state::emit(state::UiEvent::StateChanged));
+                cx.notify();
+            }))
+            .into_any_element(),
+        _ => btn_secondary("Open Privacy Settings")
+            .id("cam-settings")
+            .on_click(cx.listener(|_v, _e, _w, _cx| {
+                let _ = std::process::Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
+                    .spawn();
+            }))
+            .into_any_element(),
+    }
+}
+
+impl ThinSttView {
+    fn lips_panel(
+        &mut self,
+        spec: Option<String>,
+        first_model: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let perm = camera::permission();
+        let has_cam = camera::has_camera();
+        let model = lips::best_model();
+        let (previewing, face) = camera::LIVE
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or((false, false), |l| (l.previewing, l.face));
+        let ready = perm == CAMERA_AUTHORIZED && model.is_some() && spec.is_some() && has_cam;
+
+        // ---- live framing preview
+        let screen = div()
+            .relative()
+            .flex_none()
+            .w(px(240.))
+            .h(px(180.))
+            .rounded(px(12.))
+            .overflow_hidden()
+            .border_1()
+            .border_color(rgba(if previewing && face { 0x22c55e80 } else { GLASS_EDGE }))
+            .bg(rgb(0x000000));
+        let screen = match (&self.preview_img, previewing) {
+            (Some((_, frame)), true) => screen
+                .child(gpui::img(frame.clone()).size_full().object_fit(gpui::ObjectFit::Cover))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(8.))
+                        .bottom(px(8.))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .px(px(8.))
+                        .py(px(3.))
+                        .rounded_full()
+                        .bg(rgba(0x000000b3))
+                        .child(dot(if face { GREEN } else { AMBER }, 6.))
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(rgb(FG))
+                                .child(if face { "Lips in frame" } else { "Looking for your face…" }),
+                        ),
+                ),
+            _ => screen.flex().flex_col().items_center().justify_center().gap(px(10.)).child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(SUBTLE))
+                    .child(if !has_cam { "No camera found" } else if previewing { "Starting camera…" } else { "Camera off" }),
+            ),
+        };
+        let toggle_preview: AnyElement = if previewing {
+            btn_secondary("Stop preview")
+                .id("cam-preview")
+                .on_click(cx.listener(|_v, _e, _w, cx| {
+                    let _ = camera::set_preview(false);
+                    cx.notify();
+                }))
+                .into_any_element()
+        } else if perm == CAMERA_AUTHORIZED && has_cam {
+            btn_secondary("Check framing")
+                .id("cam-preview")
+                .on_click(cx.listener(|_v, _e, _w, cx| {
+                    if let Err(e) = camera::set_preview(true) {
+                        state::status_err(format!("camera: {}", e));
+                    }
+                    cx.notify();
+                }))
+                .into_any_element()
+        } else {
+            camera_access(perm, cx)
+        };
+
+        let headline = match &spec {
+            Some(spec) => div()
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .child(div().text_size(px(15.)).text_color(rgb(MUTED)).child("Hold"))
+                .child(keycaps(spec, true))
+                .child(div().text_size(px(15.)).text_color(rgb(MUTED)).child("and mouth your words")),
+            None => div()
+                .text_size(px(18.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(FG))
+                .child("Set up silent dictation"),
+        };
+        let info = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .gap(px(14.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(dot(if ready { GREEN } else { AMBER }, 7.))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(if ready { GREEN } else { AMBER }))
+                            .child(if ready { "LIPS READY" } else { "LIPS SETUP" }),
+                    ),
+            )
+            .child(headline)
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(rgb(MUTED))
+                    .child("No microphone and no audio. Only small grayscale mouth crops are kept in memory, decoded on this Mac, then dropped."),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(8.))
+                    .child(tag(model.map_or("No lip model", |m| m.label), FG, 0xffffff14))
+                    .child(tag("Mic off", MUTED, 0xffffff0d))
+                    .child(tag("Never saved", MUTED, 0xffffff0d))
+                    .child(tag("No polish", MUTED, 0xffffff0d)),
+            )
+            .child(div().flex().child(toggle_preview));
+        let hero = div()
+            .flex()
+            .items_center()
+            .gap(px(24.))
+            .rounded(px(16.))
+            .border_1()
+            .border_color(rgba(GLASS_EDGE))
+            .shadow_lg()
+            .bg(linear_gradient(
+                160.,
+                linear_color_stop(rgba(0xffffff12), 0.),
+                linear_color_stop(rgba(0xffffff03), 1.),
+            ))
+            .p(px(24.))
+            .child(screen)
+            .child(info);
+
+        // ---- checklist
+        let flare = models::by_id(lips::FLARE_MODEL_ID);
+        let flare_dl = flare.map_or(false, |m| self.is_downloading(m.id));
+        let model_action: AnyElement = if model.is_some() {
+            div().into_any_element()
+        } else if flare_dl {
+            let (done, total) = self.progress.get(lips::FLARE_MODEL_ID).copied().unwrap_or((0, 0));
+            let frac = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(progress_bar(frac, 120.))
+                .child(div().w(px(34.)).text_size(px(12.)).text_color(rgb(MUTED)).child(format!("{:.0}%", frac * 100.0)))
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .gap(px(6.))
+                .child(btn_ghost("Browse").id("lips-browse").on_click(cx.listener(|v, _e, _w, cx| {
+                    v.page = Page::Models;
+                    cx.notify();
+                })))
+                .child(btn_primary("Get FLARE Large · 430 MB").id("lips-dl").on_click(cx.listener(|_v, _e, _w, cx| {
+                    actions::start_download(lips::FLARE_MODEL_ID);
+                    cx.notify();
+                })))
+                .into_any_element()
+        };
+        let model_ready = model.is_some();
+        let shortcut_target = first_model.or(model.map(|m| m.id));
+        let shortcut_action: AnyElement = match (&spec, shortcut_target) {
+            (None, Some(id)) => btn_primary("Choose shortcut")
+                .id("lips-hk")
+                .on_click(cx.listener(move |v, _e, w, cx| v.start_capture(id, w, cx)))
+                .into_any_element(),
+            _ => div().into_any_element(),
+        };
+        let cam_ok = perm == CAMERA_AUTHORIZED;
+        let steps = vec![
+            step_row(1, cam_ok && has_cam, has_cam, "Allow camera access",
+                if has_cam { "Used only while your shortcut is held in Lips mode." } else { "Connect a camera to use Lips mode." },
+                if cam_ok { div().into_any_element() } else { camera_access(perm, cx) }),
+            step_row(2, model_ready, true, "Download a lip-reading model",
+                "FLARE Large is the most accurate open model: 15.9% word error on LRS3.",
+                model_action),
+            step_row(3, spec.is_some(), model_ready, "Choose a hold-to-read shortcut",
+                "Every shortcut reads lips while Lips mode is on.",
+                shortcut_action),
+            step_row(4, previewing && face, cam_ok, "Check your framing",
+                "Face the camera in good light with your whole mouth visible.",
+                div().into_any_element()),
+        ];
+        let mut out = vec![hero.into_any_element()];
+        out.push(group("LIPS SETUP", Some("works best with full sentences, mouthed clearly"), steps).into_any_element());
+        out
+    }
+}
+
 fn polish_toggle(on: bool, ready: bool, cx: &mut Context<ThinSttView>) -> gpui::Stateful<gpui::Div> {
     toggle(on)
         .when(!ready, |d| d.opacity(0.45))
@@ -1777,7 +2175,8 @@ fn polish_toggle(on: bool, ready: bool, cx: &mut Context<ThinSttView>) -> gpui::
 }
 
 impl Render for ThinSttView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.refresh_preview(window);
         let body = match self.page {
             Page::Dictate => self.render_dictate(cx),
             Page::Models => self.render_models(cx),

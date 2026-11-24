@@ -331,7 +331,7 @@ fn hotkey_pressed(id: u32, recorder: &mut Option<audio::Recorder>) {
     if info.engine == "llm" {
         return; // polish model — not a transcription engine
     }
-    if s.cfg.lock().unwrap().lips() {
+    if info.engine == "lips" || s.cfg.lock().unwrap().lips() {
         lips_pressed();
         return;
     }
@@ -430,7 +430,7 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
     });
 }
 
-static LIP_CAM: std::sync::Mutex<Option<camera::Camera>> = std::sync::Mutex::new(None);
+const LIP_LEVEL_GAIN: f32 = 0.35;
 
 fn lips_pressed() {
     let Some(model) = lips::best_model() else {
@@ -449,7 +449,7 @@ fn lips_pressed() {
         l.started = None;
         l.frames = 0;
     }
-    let mut cam = LIP_CAM.lock().unwrap();
+    let mut cam = camera::CAM.lock().unwrap();
     if cam.is_none() {
         match camera::Camera::start() {
             Ok(c) => *cam = Some(c),
@@ -487,7 +487,7 @@ fn lips_released(mode: String) {
     if !previewing {
         // Never drop the session while holding LIVE: stopRunning waits
         // for the capture queue, whose callback takes that lock.
-        let cam = LIP_CAM.lock().unwrap().take();
+        let cam = camera::CAM.lock().unwrap().take();
         drop(cam);
     }
     let (Some(front), Some(model)) = (front, lips::best_model()) else { return };
@@ -499,16 +499,16 @@ fn lips_released(mode: String) {
     });
     std::thread::spawn(move || {
         let faces = front.faces;
-        let crops = front.finish();
-        let frames = crops.len() / (lips::CROP * lips::CROP);
+        let clip = front.finish();
+        let frames = clip.frames();
         let res = if faces == 0 {
             Err("no face in view".to_string())
         } else if frames < lips::MIN_FRAMES {
             Err("clip too short".to_string())
         } else {
-            lips::transcribe(model.id, &crops)
+            lips::transcribe(model.id, &clip)
         };
-        drop(crops);
+        drop(clip);
         state::emit(UiEvent::OverlayHide);
         match res {
             Ok(text) if !text.is_empty() => {
@@ -609,11 +609,37 @@ fn install_flags_monitor() {
     }
 }
 
+thread_local! {
+    static TRAY_SOURCE: std::cell::RefCell<Option<(muda::CheckMenuItem, muda::CheckMenuItem)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn sync_tray_source() {
+    let lips = state().cfg.lock().unwrap().lips();
+    TRAY_SOURCE.with(|t| {
+        if let Some((voice, lip)) = t.borrow().as_ref() {
+            voice.set_checked(!lips);
+            lip.set_checked(lips);
+        }
+    });
+}
+
 fn setup_tray() {
     let menu = muda::Menu::new();
     let show = muda::MenuItem::with_id("show", "Show Thin STT", true, None);
+    let lips = state().cfg.lock().unwrap().lips();
+    let voice = muda::CheckMenuItem::with_id("src-voice", "Voice — microphone", true, !lips, None);
+    let lip = muda::CheckMenuItem::with_id("src-lips", "Lips — camera, silent", true, lips, None);
     let quit = muda::MenuItem::with_id("quit", "Quit Thin STT", true, None);
-    let _ = menu.append_items(&[&show, &quit]);
+    let _ = menu.append_items(&[
+        &show,
+        &muda::PredefinedMenuItem::separator(),
+        &voice,
+        &lip,
+        &muda::PredefinedMenuItem::separator(),
+        &quit,
+    ]);
+    TRAY_SOURCE.with(|t| *t.borrow_mut() = Some((voice, lip)));
 
     let icon = load_tray_icon();
     let tray = tray_icon::TrayIconBuilder::new()
@@ -671,6 +697,8 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                 "quit" => {
                     let _ = cx.update(|cx| cx.quit());
                 }
+                "src-voice" => actions::set_input_source("voice"),
+                "src-lips" => actions::set_input_source("lips"),
                 _ => {}
             }
         }
@@ -685,6 +713,7 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                     let _ = cx.update(|cx| hide_overlay(cx, &mut overlay));
                 }
                 UiEvent::StateChanged => {
+                    sync_tray_source();
                     let _ = cx.update(|cx| notify_main(cx));
                 }
                 UiEvent::Status { text, error } => {
@@ -708,9 +737,15 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                 }
             }
         }
-        // Live mic meter for the overlay while the hotkey is held.
-        if let (Some(rec), Some(h)) = (recorder.as_ref(), overlay.as_ref()) {
-            let level = rec.level();
+        // Live meter for the overlay while the hotkey is held: mic level,
+        // or mouth openness when reading lips.
+        let lip_level = camera::LIVE
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|l| l.front.is_some())
+            .map(|l| if l.face { l.openness * LIP_LEVEL_GAIN } else { 0.0 });
+        if let (Some(level), Some(h)) = (recorder.as_ref().map(|r| r.level()).or(lip_level), overlay.as_ref()) {
             let _ = cx.update(|cx| {
                 let _ = h.update(cx, |v, _w, cx| {
                     if v.live {
@@ -785,15 +820,16 @@ fn selftest_lipfile() {
         front.push(t, f.to_vec(), w, h, m.map(|x| x.0), m.map(|x| x.1).unwrap_or(0.0));
     }
     let faces = front.faces;
-    let crops = front.finish();
-    println!("frames {} faces {} crops {}", raw.len() / (w * h), faces, crops.len() / (lips::CROP * lips::CROP));
+    let clip = front.finish();
+    println!("frames {} faces {} crops {}", raw.len() / (w * h), faces, clip.frames());
     if let Some(out) = a.get(5) {
-        std::fs::write(out, &crops).unwrap();
+        std::fs::write(out, &clip.lips).unwrap();
+        std::fs::write(format!("{}.face", out), &clip.face).unwrap();
     }
-    for id in [lips::FAST_MODEL_ID] {
+    for id in [lips::FAST_MODEL_ID, lips::FLARE_MODEL_ID] {
         if models::by_id(id).map_or(false, models::is_downloaded) {
             let t = Instant::now();
-            println!("{}: {:?} ({:?})", id, lips::transcribe(id, &crops), t.elapsed());
+            println!("{}: {:?} ({:?})", id, lips::transcribe(id, &clip), t.elapsed());
         }
     }
 }

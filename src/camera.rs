@@ -69,9 +69,96 @@ pub struct Live {
     pub frames: usize,
     pub openness: f32,
     pub started: Option<f64>,
+    /// Latest mirrored BGRA preview (PREVIEW_W wide) and its sequence number.
+    pub preview: Vec<u8>,
+    pub preview_h: usize,
+    pub preview_seq: u64,
 }
 
 pub static LIVE: Mutex<Option<Live>> = Mutex::new(None);
+/// The running capture session, shared by preview and hold-to-read.
+pub static CAM: Mutex<Option<Camera>> = Mutex::new(None);
+pub const PREVIEW_W: usize = 240;
+const PREVIEW_EVERY: u64 = 2;
+
+/// Turn the framing preview on or off. The camera runs only while the
+/// preview is open or the shortcut is held.
+pub fn set_preview(on: bool) -> Result<(), String> {
+    if on {
+        LIVE.lock().unwrap().get_or_insert_with(Default::default).previewing = true;
+        let mut cam = CAM.lock().unwrap();
+        if cam.is_none() {
+            match Camera::start() {
+                Ok(c) => *cam = Some(c),
+                Err(e) => {
+                    LIVE.lock().unwrap().take();
+                    return Err(e);
+                }
+            }
+        }
+    } else {
+        let idle = {
+            let mut live = LIVE.lock().unwrap();
+            let idle = live.as_ref().map_or(true, |l| l.front.is_none());
+            if idle {
+                *live = None;
+            } else if let Some(l) = live.as_mut() {
+                l.previewing = false;
+                l.preview = Vec::new();
+            }
+            idle
+        };
+        // Never drop the session while holding LIVE: stopRunning waits
+        // for the capture queue, whose callback takes that lock.
+        if idle {
+            let cam = CAM.lock().unwrap().take();
+            drop(cam);
+        }
+    }
+    Ok(())
+}
+
+pub fn previewing() -> bool {
+    LIVE.lock().unwrap().as_ref().map_or(false, |l| l.previewing)
+}
+
+/// Downscale + mirror luma into BGRA and outline the mouth.
+fn draw_preview(live: &mut Live, luma: &[u8], w: usize, h: usize, marks: Option<&Keypoints>) {
+    let (pw, ph) = (PREVIEW_W, PREVIEW_W * h / w.max(1));
+    let mut out = vec![0u8; pw * ph * 4];
+    for y in 0..ph {
+        let sy = y * h / ph;
+        for x in 0..pw {
+            let sx = (pw - 1 - x) * w / pw;
+            let v = luma[sy * w + sx];
+            out[(y * pw + x) * 4..][..4].copy_from_slice(&[v, v, v, 255]);
+        }
+    }
+    if let Some(m) = marks {
+        let eye = ((m[0][0] - m[1][0]).powi(2) + (m[0][1] - m[1][1]).powi(2)).sqrt();
+        let (cx, cy) = (m[3][0], m[3][1]);
+        let (hw, hh) = (eye * 0.6, eye * 0.4);
+        let to = |x: f32, y: f32| (((w as f32 - x) * pw as f32 / w as f32) as i64, (y * ph as f32 / h as f32) as i64);
+        let (x0, y0) = to(cx + hw, cy - hh);
+        let (x1, y1) = to(cx - hw, cy + hh);
+        let mut put = |x: i64, y: i64| {
+            if x >= 0 && y >= 0 && (x as usize) < pw && (y as usize) < ph {
+                out[(y as usize * pw + x as usize) * 4..][..4].copy_from_slice(&[94, 197, 34, 255]);
+            }
+        };
+        for x in x0..=x1 {
+            put(x, y0);
+            put(x, y1);
+        }
+        for y in y0..=y1 {
+            put(x0, y);
+            put(x1, y);
+        }
+    }
+    live.preview = out;
+    live.preview_h = ph;
+    live.preview_seq += 1;
+}
 
 fn ns(s: &str) -> id {
     unsafe { NSString::alloc(nil).init_str(s) }
@@ -137,16 +224,24 @@ unsafe fn handle_sample(sb: *mut c_void) {
     if let Some((_, open)) = marks {
         live.openness = open;
     }
+    let preview_now = live.previewing && (live.preview_seq == 0 || (t / 0.04) as u64 % PREVIEW_EVERY == 0);
+    if live.front.is_none() && !preview_now {
+        return;
+    }
+    CVPixelBufferLockBaseAddress(pb, 1);
+    let (w, h) = (CVPixelBufferGetWidthOfPlane(pb, 0), CVPixelBufferGetHeightOfPlane(pb, 0));
+    let stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
+    let base = CVPixelBufferGetBaseAddressOfPlane(pb, 0);
+    let mut luma = Vec::with_capacity(w * h);
+    for y in 0..h {
+        luma.extend_from_slice(std::slice::from_raw_parts(base.add(y * stride), w));
+    }
+    CVPixelBufferUnlockBaseAddress(pb, 1);
+    if preview_now {
+        draw_preview(live, &luma, w, h, marks.as_ref().map(|m| &m.0));
+        crate::state::emit(crate::state::UiEvent::StateChanged);
+    }
     if let Some(front) = live.front.as_mut() {
-        CVPixelBufferLockBaseAddress(pb, 1);
-        let (w, h) = (CVPixelBufferGetWidthOfPlane(pb, 0), CVPixelBufferGetHeightOfPlane(pb, 0));
-        let stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
-        let base = CVPixelBufferGetBaseAddressOfPlane(pb, 0);
-        let mut luma = Vec::with_capacity(w * h);
-        for y in 0..h {
-            luma.extend_from_slice(std::slice::from_raw_parts(base.add(y * stride), w));
-        }
-        CVPixelBufferUnlockBaseAddress(pb, 1);
         let (k, open) = marks.map(|(k, o)| (Some(k), o)).unwrap_or((None, 0.0));
         front.push(t, luma, w, h, k, open);
         live.frames = front.frames();
