@@ -136,6 +136,18 @@ fn mb(bytes: u64) -> String {
     }
 }
 
+/// The app icon (small copy), shared so it's decoded once.
+fn app_icon() -> std::sync::Arc<gpui::Image> {
+    static ICON: std::sync::OnceLock<std::sync::Arc<gpui::Image>> = std::sync::OnceLock::new();
+    ICON.get_or_init(|| {
+        std::sync::Arc::new(gpui::Image::from_bytes(
+            gpui::ImageFormat::Png,
+            include_bytes!("../assets/icon-128.png").to_vec(),
+        ))
+    })
+    .clone()
+}
+
 fn mb_f(m: f64) -> String {
     mb((m * 1024.0 * 1024.0) as u64)
 }
@@ -451,17 +463,10 @@ impl ThinSttView {
                     .px(px(20.))
                     .pb(px(18.))
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_center()
+                        gpui::img(app_icon())
                             .size(px(30.))
-                            .rounded(px(8.))
-                            .bg(rgb(FG))
-                            .shadow_md()
-                            .text_size(px(15.))
-                            .text_color(rgb(ON_ACCENT))
-                            .child("◖◗"),
+                            .rounded(px(7.))
+                            .shadow_md(),
                     )
                     .child(
                         div()
@@ -1228,13 +1233,19 @@ impl ThinSttView {
                         cx.notify();
                     },
                 )))
+                .child(btn_secondary("Keep models").id("uninstall-keep").on_click(cx.listener(
+                    |_v, _e, _w, cx| {
+                        actions::uninstall(true);
+                        cx.quit();
+                    },
+                )))
                 .child(
                     button_base("Delete everything")
                         .bg(rgb(DANGER))
                         .text_color(rgb(0xffffff))
                         .id("uninstall-yes")
                         .on_click(cx.listener(|_v, _e, _w, cx| {
-                            actions::uninstall();
+                            actions::uninstall(false);
                             cx.quit();
                         })),
                 )
@@ -1252,12 +1263,12 @@ impl ThinSttView {
             "DANGER ZONE",
             None,
             vec![setting_row(
-                "Completely delete Thin STT",
+                "Delete Thin STT",
                 Some(
                     if self.confirm_delete {
-                        "This removes every model, your settings and the app. It can't be undone."
+                        "Keep models saves them for a reinstall. The app and settings go either way."
                     } else {
-                        "Removes downloaded models, settings and the app bundle."
+                        "Removes the app and its settings, with or without your downloaded models."
                     }
                     .into(),
                 ),

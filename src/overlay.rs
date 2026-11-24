@@ -222,21 +222,6 @@ impl Render for OverlayView {
             .w(px(BUBBLE_W))
             .h(px(bh))
             .rounded(px(radius))
-            .when(glass, |d| {
-                // dark core inset from the glass rim, so the native edge
-                // stays the only stroke
-                d.child(
-                    div()
-                        .absolute()
-                        .inset(px(2.))
-                        .rounded(px(radius - 2.))
-                        .bg(gpui::linear_gradient(
-                            180.,
-                            gpui::linear_color_stop(rgba(0x000000b3), 0.),
-                            gpui::linear_color_stop(rgba(0x00000066), 1.),
-                        )),
-                )
-            })
             .when(!glass, |d| {
                 d.bg(gpui::linear_gradient(
                     180.,

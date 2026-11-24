@@ -152,8 +152,7 @@ pub fn glass_available() -> bool {
     objc::runtime::Class::get("NSGlassEffectView").is_some()
 }
 
-/// Liquid Glass (macOS 26 `NSGlassEffectView`) slotted under the GPUI view,
-/// dark-tinted so the Siri light reads against it. `frame` is in the
+/// Liquid Glass (macOS 26 `NSGlassEffectView`) slotted under the GPUI view. `frame` is in the
 /// content view's (bottom-left origin) coordinates; no-op on older macOS.
 #[allow(deprecated)]
 unsafe fn add_glass(gpui_view: cocoa::base::id, frame: cocoa::foundation::NSRect, radius: f64) {
@@ -168,8 +167,14 @@ unsafe fn add_glass(gpui_view: cocoa::base::id, frame: cocoa::foundation::NSRect
     let glass: id = msg_send![cls, alloc];
     let glass: id = msg_send![glass, initWithFrame: frame];
     let _: () = msg_send![glass, setCornerRadius: radius];
-    let tint: id = msg_send![objc::class!(NSColor), colorWithSRGBRed: 0.02f64 green: 0.02f64 blue: 0.04f64 alpha: 0.82f64];
-    let _: () = msg_send![glass, setTintColor: tint];
+    // Stock regular glass, forced to the dark appearance.
+    use cocoa::foundation::NSString;
+    let name = NSString::alloc(nil).init_str("NSAppearanceNameDarkAqua");
+    let dark: id = msg_send![objc::class!(NSAppearance), appearanceNamed: name];
+    let _: () = msg_send![name, release];
+    if dark != nil {
+        let _: () = msg_send![glass, setAppearance: dark];
+    }
     // NSWindowBelow = -1
     let _: () = msg_send![parent, addSubview: glass positioned: -1isize relativeTo: gpui_view];
     let _: () = msg_send![glass, release];
