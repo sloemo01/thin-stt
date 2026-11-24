@@ -212,22 +212,9 @@ impl Render for OverlayView {
         let model: SharedString = self.detail.split(" · ").next().unwrap_or("").to_string().into();
         let bh = if self.cam { BUBBLE_CAM_H } else { BUBBLE_H };
         let radius = bubble_radius(self.cam);
-        // Liquid Glass sits natively behind this view; darken its top so
-        // text stays legible with a clearer lower half.
+        // With Liquid Glass the native view draws the shape, tint and edge;
+        // painting our own on top misaligns with its continuous corners.
         let glass = crate::glass_available();
-        let shade = if glass {
-            gpui::linear_gradient(
-                180.,
-                gpui::linear_color_stop(rgba(0x000000c8), 0.),
-                gpui::linear_color_stop(rgba(0x0000004d), 1.),
-            )
-        } else {
-            gpui::linear_gradient(
-                180.,
-                gpui::linear_color_stop(rgba(0x050507f5), 0.),
-                gpui::linear_color_stop(rgba(0x0b0b12f0), 1.),
-            )
-        };
         let bubble = div()
             .absolute()
             .left(px(MARGIN_X))
@@ -235,9 +222,15 @@ impl Render for OverlayView {
             .w(px(BUBBLE_W))
             .h(px(bh))
             .rounded(px(radius))
-            .bg(shade)
-            .border_1()
-            .border_color(rgba(0xffffff2e))
+            .when(!glass, |d| {
+                d.bg(gpui::linear_gradient(
+                    180.,
+                    gpui::linear_color_stop(rgba(0x050507f5), 0.),
+                    gpui::linear_color_stop(rgba(0x0b0b12f0), 1.),
+                ))
+                .border_1()
+                .border_color(rgba(0xffffff2e))
+            })
             .flex()
             .flex_col()
             .items_center()
@@ -245,21 +238,7 @@ impl Render for OverlayView {
             .text_color(rgb(0xfafafa))
             .font_family(".SystemUIFont")
             .when(self.cam, |d| d.p(px(12.)).pb(px(16.)).justify_end())
-            .when(!self.cam, |d| d.justify_center())
-            // a hairline of specular light across the top edge
-            .child(
-                div()
-                    .absolute()
-                    .top(px(1.))
-                    .left(px(radius))
-                    .right(px(radius))
-                    .h(px(1.))
-                    .bg(gpui::linear_gradient(
-                        90.,
-                        gpui::linear_color_stop(rgba(0xffffff00), 0.),
-                        gpui::linear_color_stop(rgba(0xffffff59), 0.5),
-                    )),
-            );
+            .when(!self.cam, |d| d.justify_center());
         let bubble = if self.cam { bubble.child(self.camera_view()).child(div().flex_1()) } else { bubble };
         let bubble = bubble.child(wave).child(
             div()

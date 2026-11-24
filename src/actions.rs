@@ -611,8 +611,9 @@ pub fn set_paste_mode(mode: &str) {
 }
 
 /// Spawn a detached cleaner that removes app data (and the .app bundle) once
-/// this process exits. Caller should quit the app right after.
-pub fn uninstall() {
+/// this process exits; `keep_models` spares the models folder so a reinstall
+/// reuses it. Caller should quit the app right after.
+pub fn uninstall(keep_models: bool) {
     let pid = std::process::id();
     let data = config::app_data_dir();
     let exe = std::env::current_exe().unwrap_or_default();
@@ -621,13 +622,18 @@ pub fn uninstall() {
         .find(|p| p.extension().map(|e| e == "app").unwrap_or(false))
         .map(|p| p.to_path_buf());
 
-    let mut script = format!(
-        "while kill -0 {} 2>/dev/null; do sleep 1; done; rm -rf '{}'",
-        pid,
-        data.display()
-    );
+    let wipe = if keep_models {
+        format!(
+            "find '{}' -mindepth 1 -maxdepth 1 ! -name models -exec rm -rf {{}} +",
+            data.display()
+        )
+    } else {
+        format!("rm -rf '{}'", data.display())
+    };
+    let mut script = format!("while kill -0 {} 2>/dev/null; do sleep 1; done; {}", pid, wipe);
+    let app_bundle = app_bundle.map(|a| format!("; rm -rf '{}'", a.display()));
     if let Some(app) = app_bundle {
-        script.push_str(&format!(" '{}'", app.display()));
+        script.push_str(&app);
     }
     let _ = std::process::Command::new("sh").arg("-c").arg(script).spawn();
 }
