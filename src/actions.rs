@@ -150,6 +150,9 @@ fn download_all(info: &'static models::ModelInfo, cancel: &Arc<AtomicBool>) -> R
         drop(file);
         std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
     }
+    // Drop stale parts from earlier interrupted attempts, or the launch
+    // sweep would later treat the finished model as incomplete.
+    cleanup(&dir);
     state::emit(state::UiEvent::DownloadProgress { id: info.id.to_string(), done, total: done });
     Ok(())
 }
