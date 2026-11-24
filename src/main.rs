@@ -168,7 +168,7 @@ unsafe fn add_glass(gpui_view: cocoa::base::id, frame: cocoa::foundation::NSRect
     let glass: id = msg_send![cls, alloc];
     let glass: id = msg_send![glass, initWithFrame: frame];
     let _: () = msg_send![glass, setCornerRadius: radius];
-    let tint: id = msg_send![objc::class!(NSColor), colorWithSRGBRed: 0.02f64 green: 0.02f64 blue: 0.04f64 alpha: 0.45f64];
+    let tint: id = msg_send![objc::class!(NSColor), colorWithSRGBRed: 0.02f64 green: 0.02f64 blue: 0.04f64 alpha: 0.82f64];
     let _: () = msg_send![glass, setTintColor: tint];
     // NSWindowBelow = -1
     let _: () = msg_send![parent, addSubview: glass positioned: -1isize relativeTo: gpui_view];
