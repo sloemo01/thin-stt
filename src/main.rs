@@ -178,7 +178,7 @@ fn show_overlay(
         }
     }
     let pos = overlay_position(cx);
-    let cam = state::state().cfg.lock().unwrap().lips();
+    let cam = lips_active() || DEMO_CAM.load(std::sync::atomic::Ordering::Relaxed);
     let height = if cam { OVERLAY_CAM_H } else { OVERLAY_H };
     let opened = cx.open_window(
         WindowOptions {
@@ -375,13 +375,14 @@ const LIP_LEVEL_GAIN: f32 = 0.35;
 
 /// `--overlay-demo`: synthetic speech levels to preview the overlay.
 static DEMO_LEVEL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static DEMO_CAM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn overlay_demo() {
     if let Some(i) = std::env::args().position(|a| a == "--overlay-demo-lips") {
         let a: Vec<String> = std::env::args().collect();
         let (w, h): (usize, usize) = (a[i + 2].parse().unwrap(), a[i + 3].parse().unwrap());
         let raw = std::fs::read(&a[i + 1]).expect("read frames");
-        state::state().cfg.lock().unwrap().input_source = Some("lips".into());
+        DEMO_CAM.store(true, std::sync::atomic::Ordering::Relaxed);
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(2));
             state::emit(UiEvent::Overlay {
