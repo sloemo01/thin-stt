@@ -1,8 +1,9 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
     div, prelude::*, pulsating_between, px, rgb, rgba,
-    Animation, AnimationExt, Context, FontWeight, SharedString, Window,
+    Animation, AnimationExt, Context, FontWeight, ObjectFit, RenderImage, SharedString, Window,
 };
 
 /// Level history; the waveform mirrors it outward from the centre bar.
@@ -12,6 +13,7 @@ const WAVE_H: f32 = 40.;
 const BAR_W: f32 = 5.;
 const BAR_MIN: f32 = 6.;
 const SHIMMER_MS: u64 = 1400;
+const CAM_H: f32 = 168.;
 
 pub struct OverlayView {
     pub title: SharedString,
@@ -21,17 +23,81 @@ pub struct OverlayView {
     /// while recording. Unused while transcribing.
     pub levels: [f32; LEVEL_BARS],
     pub live: bool,
+    /// Lips mode: show the camera so you can check your framing.
+    pub cam: bool,
+    frame: Option<(u64, Arc<RenderImage>)>,
+    face: bool,
 }
 
 impl OverlayView {
-    pub fn new(title: impl Into<SharedString>, detail: impl Into<SharedString>, color: u32, live: bool) -> Self {
+    pub fn new(title: impl Into<SharedString>, detail: impl Into<SharedString>, color: u32, live: bool, cam: bool) -> Self {
         OverlayView {
             title: title.into(),
             detail: detail.into(),
             color,
             levels: [0.0; LEVEL_BARS],
             live,
+            cam,
+            frame: None,
+            face: false,
         }
+    }
+
+    /// Swap in the newest camera frame; the old texture is freed at once.
+    /// The last frame stays (frozen) while decoding.
+    fn refresh_frame(&mut self, window: &mut Window) {
+        let next = crate::camera::LIVE.lock().unwrap().as_ref().and_then(|l| {
+            self.face = l.face;
+            let stale = self.frame.as_ref().map_or(true, |f| f.0 != l.preview_seq);
+            (!l.preview.is_empty() && stale).then(|| (l.preview_seq, l.preview_h, l.preview.clone()))
+        });
+        let Some((seq, h, data)) = next else { return };
+        let Some(img) = image::RgbaImage::from_raw(crate::camera::PREVIEW_W as u32, h as u32, data) else { return };
+        let img = Arc::new(RenderImage::new(vec![image::Frame::new(img)]));
+        if let Some((_, old)) = self.frame.replace((seq, img)) {
+            let _ = window.drop_image(old);
+        }
+    }
+
+    fn camera_view(&self) -> gpui::Div {
+        let screen = div()
+            .relative()
+            .w_full()
+            .h(px(CAM_H))
+            .rounded(px(18.))
+            .overflow_hidden()
+            .bg(rgb(0x111113))
+            .border_1()
+            .border_color(rgba(if self.face && self.live { 0x22c55e66 } else { 0xffffff14 }));
+        let Some((_, frame)) = &self.frame else {
+            return screen.flex().items_center().justify_center().child(
+                div().text_size(px(11.)).text_color(rgb(0x71717a)).child("Starting camera…"),
+            );
+        };
+        let (dot, label) = match (self.live, self.face) {
+            (false, _) => (0xa1a1aa, "Decoding"),
+            (true, true) => (0x22c55e, "Lips locked"),
+            (true, false) => (0xf59e0b, "Find your face"),
+        };
+        screen
+            .child(gpui::img(frame.clone()).size_full().object_fit(ObjectFit::Cover).opacity(if self.live { 1.0 } else { 0.45 }))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(8.))
+                    .top(px(8.))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.))
+                    .px(px(8.))
+                    .py(px(3.))
+                    .rounded_full()
+                    .bg(rgba(0x000000b3))
+                    .text_size(px(10.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(div().size(px(6.)).rounded_full().bg(rgb(dot)))
+                    .child(label),
+            )
     }
 
     pub fn push_level(&mut self, level: f32) {
@@ -57,7 +123,10 @@ fn bar(h: f32, alpha: f32) -> gpui::Div {
 }
 
 impl Render for OverlayView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        if self.cam {
+            self.refresh_frame(window);
+        }
         let mut wave = div().flex().items_center().justify_center().gap(px(4.)).h(px(WAVE_H));
         if self.live {
             for i in 0..WAVE_BARS {
@@ -92,21 +161,22 @@ impl Render for OverlayView {
 
         let model: SharedString = self.detail.split(" · ").next().unwrap_or("").to_string().into();
         // Solid black pill filling the window; same radius as the native backing.
-        div()
+        let pill = div()
             .relative()
             .size_full()
-            .rounded_full()
+            .when(self.cam, |d| d.rounded(px(28.)).p(px(10.)).pb(px(12.)).justify_end())
+            .when(!self.cam, |d| d.rounded_full().justify_center())
             .bg(rgb(0x000000))
             .border_1()
             .border_color(rgba(0xffffff1f))
             .flex()
             .flex_col()
             .items_center()
-            .justify_center()
             .gap(px(6.))
             .text_color(rgb(0xfafafa))
-            .font_family(".SystemUIFont")
-            .child(wave)
+            .font_family(".SystemUIFont");
+        let pill = if self.cam { pill.child(self.camera_view()).child(div().flex_1()) } else { pill };
+        pill.child(wave)
             .child(
                 div()
                     .flex()

@@ -122,6 +122,17 @@ pub fn previewing() -> bool {
     LIVE.lock().unwrap().as_ref().map_or(false, |l| l.previewing)
 }
 
+/// `--overlay-demo lips`: feed a recorded gray frame as if from the camera.
+pub fn demo_frame(luma: &[u8], w: usize, h: usize) -> f32 {
+    let marks = detect_gray(luma, w, h);
+    let mut live = LIVE.lock().unwrap();
+    let live = live.get_or_insert_with(Default::default);
+    live.face = marks.is_some();
+    live.openness = marks.map_or(0.0, |m| m.1);
+    draw_preview(live, luma, w, h, marks.as_ref().map(|m| &m.0));
+    live.openness
+}
+
 /// Downscale + mirror luma into BGRA and outline the mouth.
 fn draw_preview(live: &mut Live, luma: &[u8], w: usize, h: usize, marks: Option<&Keypoints>) {
     let (pw, ph) = (PREVIEW_W, PREVIEW_W * h / w.max(1));
@@ -224,7 +235,7 @@ unsafe fn handle_sample(sb: *mut c_void) {
     if let Some((_, open)) = marks {
         live.openness = open;
     }
-    let preview_now = live.previewing && (live.preview_seq == 0 || (t / 0.04) as u64 % PREVIEW_EVERY == 0);
+    let preview_now = (live.previewing || live.front.is_some()) && (live.preview_seq == 0 || (t / 0.04) as u64 % PREVIEW_EVERY == 0);
     if live.front.is_none() && !preview_now {
         return;
     }

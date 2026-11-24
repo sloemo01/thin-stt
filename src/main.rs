@@ -28,6 +28,8 @@ const OVERLAY_RECORDING: u32 = 0xff5a5f;
 const OVERLAY_BUSY: u32 = 0xf0b54a;
 const OVERLAY_W: f32 = 320.0;
 const OVERLAY_H: f32 = 96.0;
+/// Lips overlay: a live camera view above the waveform.
+const OVERLAY_CAM_H: f32 = 270.0;
 
 fn main() {
     tune_allocator();
@@ -41,7 +43,7 @@ fn main() {
         selftest_polish(&t);
         return;
     }
-    if std::env::args().any(|a| a == "--overlay-demo") {
+    if std::env::args().any(|a| a.starts_with("--overlay-demo")) {
         overlay_demo();
     }
     if std::env::args().nth(1).as_deref() == Some("--lipfile") {
@@ -95,28 +97,6 @@ fn main() {
             });
         }
     });
-}
-
-/// Liquid Glass (macOS 26 `NSGlassEffectView`) inserted under the GPUI view.
-/// `frame` is in the content view's coordinates; no-op on older macOS.
-#[allow(deprecated)]
-unsafe fn add_glass(gpui_view: cocoa::base::id, frame: cocoa::foundation::NSRect, radius: f64, mask: u64) {
-    use cocoa::base::{id, nil};
-    let Some(cls) = objc::runtime::Class::get("NSGlassEffectView") else {
-        return;
-    };
-    let parent: id = msg_send![gpui_view, superview];
-    if parent == nil {
-        return;
-    }
-    let glass: id = msg_send![cls, alloc];
-    let glass: id = msg_send![glass, initWithFrame: frame];
-    let _: () = msg_send![glass, setCornerRadius: radius];
-    let _: () = msg_send![glass, setAutoresizingMask: mask];
-    let tint: id = msg_send![objc::class!(NSColor), colorWithSRGBRed: 0.03f64 green: 0.03f64 blue: 0.04f64 alpha: 0.35f64];
-    let _: () = msg_send![glass, setTintColor: tint];
-    // NSWindowBelow = -1
-    let _: () = msg_send![parent, addSubview: glass positioned: -1isize relativeTo: gpui_view];
 }
 
 #[allow(deprecated)]
@@ -198,11 +178,13 @@ fn show_overlay(
         }
     }
     let pos = overlay_position(cx);
+    let cam = state::state().cfg.lock().unwrap().lips();
+    let height = if cam { OVERLAY_CAM_H } else { OVERLAY_H };
     let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: pos,
-                size: size(px(OVERLAY_W), px(OVERLAY_H)),
+                size: size(px(OVERLAY_W), px(height)),
             })),
             titlebar: None,
             focus: false,
@@ -218,27 +200,10 @@ fn show_overlay(
             window_decorations: None,
             tabbing_identifier: None,
         },
-        |_window, cx| cx.new(|_| OverlayView::new(title.clone(), detail.clone(), color, live)),
+        |_window, cx| cx.new(|_| OverlayView::new(title.clone(), detail.clone(), color, live, cam)),
     )
     .ok();
     if let Some(h) = opened {
-        let vp = h.update(cx, |_v, window, _cx| {
-            match raw_window_handle::HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
-                Ok(raw_window_handle::RawWindowHandle::AppKit(kit)) => kit.ns_view.as_ptr() as usize,
-                _ => 0,
-            }
-        });
-        if let Some(vp) = vp.ok().filter(|v| *v != 0) {
-            unsafe {
-                #[allow(deprecated)]
-                let view = vp as cocoa::base::id;
-                let frame = cocoa::foundation::NSRect::new(
-                    cocoa::foundation::NSPoint::new(0.0, 0.0),
-                    cocoa::foundation::NSSize::new(OVERLAY_W as f64, OVERLAY_H as f64),
-                );
-                add_glass(view, frame, OVERLAY_H as f64 / 2.0, 2 | 16);
-            }
-        }
         let _ = h.update(cx, |_v, window, _cx| {
             // Kill the NSPanel's drop shadow — it renders as a dark box
             // behind the transparent pill window.
@@ -412,6 +377,36 @@ const LIP_LEVEL_GAIN: f32 = 0.35;
 static DEMO_LEVEL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 fn overlay_demo() {
+    if let Some(i) = std::env::args().position(|a| a == "--overlay-demo-lips") {
+        let a: Vec<String> = std::env::args().collect();
+        let (w, h): (usize, usize) = (a[i + 2].parse().unwrap(), a[i + 3].parse().unwrap());
+        let raw = std::fs::read(&a[i + 1]).expect("read frames");
+        state::state().cfg.lock().unwrap().input_source = Some("lips".into());
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            state::emit(UiEvent::Overlay {
+                title: "Reading lips".into(),
+                detail: "FLARE Large Lips · no audio".into(),
+                color: OVERLAY_RECORDING,
+                live: true,
+            });
+            for f in raw.chunks_exact(w * h).cycle().take(400) {
+                let open = camera::demo_frame(f, w, h);
+                DEMO_LEVEL.store((0.01 + open * LIP_LEVEL_GAIN).to_bits(), std::sync::atomic::Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            DEMO_LEVEL.store(0, std::sync::atomic::Ordering::Relaxed);
+            state::emit(UiEvent::Overlay {
+                title: "Decoding lips".into(),
+                detail: "FLARE Large Lips".into(),
+                color: OVERLAY_BUSY,
+                live: false,
+            });
+            std::thread::sleep(Duration::from_secs(8));
+            state::emit(UiEvent::OverlayHide);
+        });
+        return;
+    }
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(2));
         state::emit(UiEvent::Overlay {
