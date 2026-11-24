@@ -1,6 +1,6 @@
 [package]
 name = "thin-stt"
-version = "0.1.0"
+version = "0.2.0"
 description = "Hold a hotkey in any app, speak, release — the transcript is typed where your cursor is."
 edition = "2021"
 rust-version = "1.85"
