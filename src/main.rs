@@ -27,10 +27,10 @@ use ui::ThinSttView;
 
 const OVERLAY_RECORDING: u32 = 0xff5a5f;
 const OVERLAY_BUSY: u32 = 0xf0b54a;
-const OVERLAY_W: f32 = 320.0;
-const OVERLAY_H: f32 = 96.0;
+const OVERLAY_W: f32 = overlay::BUBBLE_W + 2.0 * overlay::MARGIN_X;
+const OVERLAY_H: f32 = overlay::BUBBLE_H + overlay::MARGIN_TOP + overlay::MARGIN_BOTTOM;
 /// Lips overlay: a live camera view above the waveform.
-const OVERLAY_CAM_H: f32 = 270.0;
+const OVERLAY_CAM_H: f32 = overlay::BUBBLE_CAM_H + overlay::MARGIN_TOP + overlay::MARGIN_BOTTOM;
 
 fn main() {
     tune_allocator();
@@ -49,6 +49,10 @@ fn main() {
     }
     if std::env::args().nth(1).as_deref() == Some("--lipfile") {
         selftest_lipfile();
+        return;
+    }
+    if std::env::args().nth(1).as_deref() == Some("--download") {
+        selftest_download();
         return;
     }
     if std::env::args().any(|a| a == "--selftest") {
@@ -144,12 +148,39 @@ fn open_main_window(cx: &mut App) {
     cx.activate(true);
 }
 
+pub fn glass_available() -> bool {
+    objc::runtime::Class::get("NSGlassEffectView").is_some()
+}
+
+/// Liquid Glass (macOS 26 `NSGlassEffectView`) slotted under the GPUI view,
+/// dark-tinted so the Siri light reads against it. `frame` is in the
+/// content view's (bottom-left origin) coordinates; no-op on older macOS.
+#[allow(deprecated)]
+unsafe fn add_glass(gpui_view: cocoa::base::id, frame: cocoa::foundation::NSRect, radius: f64) {
+    use cocoa::base::{id, nil};
+    let Some(cls) = objc::runtime::Class::get("NSGlassEffectView") else {
+        return;
+    };
+    let parent: id = msg_send![gpui_view, superview];
+    if parent == nil {
+        return;
+    }
+    let glass: id = msg_send![cls, alloc];
+    let glass: id = msg_send![glass, initWithFrame: frame];
+    let _: () = msg_send![glass, setCornerRadius: radius];
+    let tint: id = msg_send![objc::class!(NSColor), colorWithSRGBRed: 0.02f64 green: 0.02f64 blue: 0.04f64 alpha: 0.45f64];
+    let _: () = msg_send![glass, setTintColor: tint];
+    // NSWindowBelow = -1
+    let _: () = msg_send![parent, addSubview: glass positioned: -1isize relativeTo: gpui_view];
+    let _: () = msg_send![glass, release];
+}
+
 fn overlay_position(cx: &App) -> Point<Pixels> {
     let w = px(OVERLAY_W);
     if let Some(d) = cx.primary_display() {
         let b = d.bounds();
         let x = b.origin.x + (b.size.width - w) / 2.0;
-        let y = b.origin.y + px(80.0);
+        let y = b.origin.y + px(80.0 - overlay::MARGIN_TOP);
         point(x, y)
     } else {
         point(px(40.0), px(80.0))
@@ -206,6 +237,19 @@ fn show_overlay(
     .ok();
     if let Some(h) = opened {
         let _ = h.update(cx, |_v, window, _cx| {
+            if let Ok(rwh) = raw_window_handle::HasWindowHandle::window_handle(window) {
+                if let raw_window_handle::RawWindowHandle::AppKit(kit) = rwh.as_raw() {
+                    let bh = if cam { overlay::BUBBLE_CAM_H } else { overlay::BUBBLE_H };
+                    let frame = cocoa::foundation::NSRect::new(
+                        cocoa::foundation::NSPoint::new(overlay::MARGIN_X as f64, overlay::MARGIN_BOTTOM as f64),
+                        cocoa::foundation::NSSize::new(overlay::BUBBLE_W as f64, bh as f64),
+                    );
+                    #[allow(deprecated)]
+                    unsafe {
+                        add_glass(kit.ns_view.as_ptr() as cocoa::base::id, frame, overlay::bubble_radius(cam) as f64)
+                    };
+                }
+            }
             // Kill the NSPanel's drop shadow — it renders as a dark box
             // behind the transparent pill window.
             if let Ok(rwh) = raw_window_handle::HasWindowHandle::window_handle(window) {
@@ -844,6 +888,38 @@ fn selftest_lipfile() {
         if models::by_id(id).map_or(false, models::is_downloaded) {
             let t = Instant::now();
             println!("{}: {:?} ({:?})", id, lips::transcribe(id, &clip), t.elapsed());
+        }
+    }
+}
+
+/// `--download <model-id> [cancel-after-secs]`: run a model download
+/// headless, printing progress, to check it starts and cancels promptly.
+fn selftest_download() {
+    let a: Vec<String> = std::env::args().collect();
+    let id = a.get(2).expect("model id").clone();
+    let cancel_after = a.get(3).and_then(|s| s.parse::<f64>().ok());
+    let (tx, rx) = std::sync::mpsc::channel();
+    *state::state().ui.lock().unwrap() = Some(tx);
+    let t = Instant::now();
+    actions::start_download(&id);
+    loop {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(UiEvent::DownloadProgress { done, total, .. }) => {
+                println!("{:6.2}s progress {} / {}", t.elapsed().as_secs_f64(), done, total)
+            }
+            Ok(UiEvent::Status { text, error }) => println!("{:6.2}s status {} (error={})", t.elapsed().as_secs_f64(), text, error),
+            _ => {}
+        }
+        if cancel_after.map_or(false, |c| t.elapsed().as_secs_f64() > c) {
+            println!("{:6.2}s cancel; downloading={}", t.elapsed().as_secs_f64(), state::state().downloads.lock().unwrap().contains_key(&id));
+            state::cancel_download(&id);
+            println!("{:6.2}s after cancel; downloading={}", t.elapsed().as_secs_f64(), state::state().downloads.lock().unwrap().contains_key(&id));
+            std::thread::sleep(Duration::from_secs(2));
+            return;
+        }
+        if !state::state().downloads.lock().unwrap().contains_key(&id) {
+            println!("{:6.2}s finished", t.elapsed().as_secs_f64());
+            return;
         }
     }
 }

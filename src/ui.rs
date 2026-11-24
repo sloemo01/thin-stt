@@ -2117,7 +2117,13 @@ impl ThinSttView {
                 .items_center()
                 .gap(px(8.))
                 .child(progress_bar(frac, 120.))
-                .child(div().w(px(34.)).text_size(px(12.)).text_color(rgb(MUTED)).child(format!("{:.0}%", frac * 100.0)))
+                .child(div().w(px(56.)).text_size(px(12.)).text_color(rgb(MUTED)).child(
+                    if total > 0 { format!("{:.0}%", frac * 100.0) } else { "Starting…".to_string() },
+                ))
+                .child(btn_ghost("Cancel").id("lips-dlc").on_click(cx.listener(|_v, _e, _w, cx| {
+                    state::cancel_download(lips::FLARE_MODEL_ID);
+                    cx.notify();
+                })))
                 .into_any_element()
         } else {
             div()
