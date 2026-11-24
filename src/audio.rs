@@ -122,6 +122,17 @@ impl Recorder {
         })
     }
 
+    /// RMS of the most recent ~50 ms of input, for the overlay meter.
+    pub fn level(&self) -> f32 {
+        let buf = self.samples.lock().unwrap();
+        let n = (self.sample_rate as usize / 20).max(1).min(buf.len());
+        if n == 0 {
+            return 0.0;
+        }
+        let tail = &buf[buf.len() - n..];
+        (tail.iter().map(|x| x * x).sum::<f32>() / n as f32).sqrt()
+    }
+
     /// Stop recording and return 16kHz mono f32 samples. Nothing is
     /// persisted — dictated audio never touches disk.
     pub fn stop(&self) -> Vec<f32> {
