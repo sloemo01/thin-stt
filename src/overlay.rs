@@ -68,9 +68,8 @@ impl Render for OverlayView {
             .flex()
             .items_center()
             .gap(px(10.))
-            .px(px(16.))
-            .bg(rgb(0x141418))
-            .text_color(rgb(0xffffff))
+            .px(px(18.))
+            .text_color(rgb(0xfafafa))
             .font_family(".SystemUIFont")
             .child(
                 div().size(px(8.)).rounded_full().bg(rgb(self.color)).with_animation(
@@ -96,7 +95,7 @@ impl Render for OverlayView {
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(rgb(0x9898a6))
+                            .text_color(rgb(0xa1a1aa))
                             .truncate()
                             .child(self.detail.clone()),
                     ),

@@ -9,24 +9,29 @@ use gpui::{
 
 use crate::{actions, audio, config, hotkeys, models, state, typer};
 
-// Palette — near-black graphite with a single indigo accent.
-const BG: u32 = 0x0e0e11;
-const SIDEBAR: u32 = 0x141418;
-const SURFACE: u32 = 0x18181d;
-const SURFACE2: u32 = 0x222229;
-const SURFACE3: u32 = 0x2c2c35;
-const HAIRLINE: u32 = 0x26262e;
-const FG: u32 = 0xececf1;
-const MUTED: u32 = 0x9898a6;
-const SUBTLE: u32 = 0x62626e;
-const ACCENT: u32 = 0x7b74ff;
-const ACCENT_HI: u32 = 0x9a94ff;
-const GREEN: u32 = 0x3ccf8e;
-const AMBER: u32 = 0xf0b54a;
-const DANGER: u32 = 0xf2555a;
+// Palette — shadcn zinc (dark) over a Liquid Glass window.
+const BG: u32 = 0x09090b;
+const SURFACE: u32 = 0x111113;
+const SURFACE2: u32 = 0x18181b;
+const SURFACE3: u32 = 0x27272a;
+const HAIRLINE: u32 = 0x232326;
+const FG: u32 = 0xfafafa;
+const MUTED: u32 = 0xa1a1aa;
+const SUBTLE: u32 = 0x71717a;
+const ACCENT: u32 = 0xfafafa;
+const ACCENT_HI: u32 = 0xd4d4d8;
+const ON_ACCENT: u32 = 0x18181b;
+const GREEN: u32 = 0x22c55e;
+const AMBER: u32 = 0xf59e0b;
+const DANGER: u32 = 0xef4444;
+// Translucent layers so the window's glass shows through.
+const GLASS_FILL: u32 = 0xffffff08;
+const GLASS_EDGE: u32 = 0xffffff14;
+const CONTENT_TINT: u32 = 0x09090bd0;
 
 const SIDEBAR_W: f32 = 212.;
 const TITLEBAR_H: f32 = 52.;
+pub const SIDEBAR_WIDTH: f32 = SIDEBAR_W;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Page {
@@ -159,9 +164,9 @@ fn button_base(label: impl Into<SharedString>) -> gpui::Div {
         .items_center()
         .justify_center()
         .gap(px(6.))
-        .h(px(28.))
+        .h(px(30.))
         .px(px(12.))
-        .rounded(px(7.))
+        .rounded(px(8.))
         .text_size(px(13.))
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
@@ -171,31 +176,33 @@ fn button_base(label: impl Into<SharedString>) -> gpui::Div {
 fn btn_primary(label: impl Into<SharedString>) -> gpui::Div {
     button_base(label)
         .bg(rgb(ACCENT))
-        .text_color(rgb(0xffffff))
+        .text_color(rgb(ON_ACCENT))
+        .shadow_sm()
         .hover(|s| s.bg(rgb(ACCENT_HI)))
 }
 
 fn btn_secondary(label: impl Into<SharedString>) -> gpui::Div {
     button_base(label)
-        .bg(rgb(SURFACE2))
+        .bg(rgba(GLASS_FILL))
         .border_1()
         .border_color(rgb(SURFACE3))
         .text_color(rgb(FG))
-        .hover(|s| s.bg(rgb(SURFACE3)))
+        .shadow_sm()
+        .hover(|s| s.bg(rgb(SURFACE2)))
 }
 
 fn btn_ghost(label: impl Into<SharedString>) -> gpui::Div {
     button_base(label)
         .text_color(rgb(MUTED))
-        .hover(|s| s.bg(rgb(SURFACE2)).text_color(rgb(FG)))
+        .hover(|s| s.bg(rgba(0xffffff0d)).text_color(rgb(FG)))
 }
 
 fn btn_danger(label: impl Into<SharedString>) -> gpui::Div {
     button_base(label)
         .border_1()
-        .border_color(rgba(0xf2555a66))
+        .border_color(rgba(0xef444466))
         .text_color(rgb(DANGER))
-        .hover(|s| s.bg(rgba(0xf2555a22)))
+        .hover(|s| s.bg(rgba(0xef444422)))
 }
 
 fn keycap(label: String, big: bool) -> gpui::Div {
@@ -209,10 +216,11 @@ fn keycap(label: String, big: bool) -> gpui::Div {
         .min_w(px(h))
         .px(px(if big { 12. } else { 7. }))
         .rounded(px(if big { 10. } else { 6. }))
-        .bg(rgb(SURFACE3))
+        .bg(rgb(SURFACE2))
         .border_1()
         .border_b(px(if big { 3. } else { 2. }))
-        .border_color(rgb(0x3a3a45))
+        .border_color(rgb(0x3f3f46))
+        .shadow_sm()
         .text_size(px(if big { 21. } else { 13. }))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(FG))
@@ -240,7 +248,7 @@ fn toggle(on: bool) -> gpui::Div {
         .cursor_pointer()
         .bg(rgb(if on { ACCENT } else { SURFACE3 }))
         .when(on, |d| d.justify_end())
-        .child(div().size(px(18.)).rounded_full().bg(rgb(0xffffff)).shadow_sm())
+        .child(div().size(px(18.)).rounded_full().bg(rgb(if on { BG } else { FG })).shadow_sm())
 }
 
 fn progress_bar(frac: f32, w: f32) -> gpui::Div {
@@ -264,9 +272,10 @@ fn card() -> gpui::Div {
         .flex()
         .flex_col()
         .rounded(px(12.))
-        .bg(rgb(SURFACE))
+        .bg(rgba(GLASS_FILL))
         .border_1()
-        .border_color(rgb(HAIRLINE))
+        .border_color(rgba(GLASS_EDGE))
+        .shadow_sm()
         .overflow_hidden()
 }
 
@@ -340,8 +349,8 @@ fn page_header(title: &str, subtitle: &str) -> gpui::Div {
         .gap(px(4.))
         .child(
             div()
-                .text_size(px(24.))
-                .font_weight(FontWeight::BOLD)
+                .text_size(px(26.))
+                .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(FG))
                 .child(title.to_string()),
         )
@@ -371,9 +380,9 @@ impl ThinSttView {
                     .rounded(px(8.))
                     .cursor_pointer()
                     .text_size(px(13.))
-                    .when(active, |d| d.bg(rgb(SURFACE2)).text_color(rgb(FG)))
+                    .when(active, |d| d.bg(rgba(0xffffff17)).text_color(rgb(FG)).shadow_sm())
                     .when(!active, |d| {
-                        d.text_color(rgb(MUTED)).hover(|s| s.bg(rgb(SURFACE)).text_color(rgb(FG)))
+                        d.text_color(rgb(MUTED)).hover(|s| s.bg(rgba(0xffffff0a)).text_color(rgb(FG)))
                     })
                     .child(icon(glyph, if active { ACCENT_HI } else { SUBTLE }))
                     .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(label))
@@ -401,9 +410,8 @@ impl ThinSttView {
             .flex_none()
             .w(px(SIDEBAR_W))
             .h_full()
-            .bg(rgb(SIDEBAR))
             .border_r_1()
-            .border_color(rgb(HAIRLINE))
+            .border_color(rgba(0xffffff12))
             .child(div().h(px(TITLEBAR_H)).flex_none())
             .child(
                 div()
@@ -419,13 +427,10 @@ impl ThinSttView {
                             .justify_center()
                             .size(px(30.))
                             .rounded(px(8.))
-                            .bg(linear_gradient(
-                                135.,
-                                linear_color_stop(rgb(0x9a94ff), 0.),
-                                linear_color_stop(rgb(0x5b52e8), 1.),
-                            ))
+                            .bg(rgb(FG))
+                            .shadow_md()
                             .text_size(px(15.))
-                            .text_color(rgb(0xffffff))
+                            .text_color(rgb(ON_ACCENT))
                             .child("◖◗"),
                     )
                     .child(
@@ -450,16 +455,16 @@ impl ThinSttView {
             .child(nav)
             .child(div().flex_1())
             .child(
-                div().p(px(12.)).child(
+                div().px(px(10.)).pb(px(8.)).child(
                     div()
                         .flex()
                         .flex_col()
                         .gap(px(6.))
                         .p(px(10.))
                         .rounded(px(10.))
-                        .bg(rgb(SURFACE))
+                        .bg(rgba(0xffffff0a))
                         .border_1()
-                        .border_color(rgb(HAIRLINE))
+                        .border_color(rgba(GLASS_EDGE))
                         .child(
                             div()
                                 .flex()
@@ -485,7 +490,7 @@ impl ThinSttView {
             )
             .child(
                 div()
-                    .px(px(22.))
+                    .px(px(20.))
                     .pb(px(14.))
                     .text_size(px(11.))
                     .text_color(rgb(SUBTLE))
@@ -520,11 +525,12 @@ impl ThinSttView {
             .flex_col()
             .rounded(px(16.))
             .border_1()
-            .border_color(rgb(0x2e2b52))
+            .border_color(rgba(GLASS_EDGE))
+            .shadow_lg()
             .bg(linear_gradient(
                 160.,
-                linear_color_stop(rgb(0x1e1b3d), 0.),
-                linear_color_stop(rgb(0x15151b), 1.),
+                linear_color_stop(rgba(0xffffff12), 0.),
+                linear_color_stop(rgba(0xffffff03), 1.),
             ))
             .p(px(28.));
         let hero = if let Some((m, spec)) = bound.first() {
@@ -565,7 +571,7 @@ impl ThinSttView {
                         .child(tag(
                             if polish_on { "Polish on" } else { "Polish off" },
                             if polish_on { ACCENT_HI } else { MUTED },
-                            if polish_on { 0x7b74ff26 } else { 0xffffff0d },
+                            if polish_on { 0xffffff26 } else { 0xffffff0d },
                         ))
                         .child(tag(
                             cfg.mic_device.clone().unwrap_or_else(|| "Default mic".into()),
@@ -1043,7 +1049,7 @@ impl ThinSttView {
 
         // ---- permissions
         let acc: AnyElement = if trusted {
-            tag("✓ Granted", GREEN, 0x3ccf8e1f).into_any_element()
+            tag("✓ Granted", GREEN, 0x22c55e1f).into_any_element()
         } else {
             btn_primary("Grant access")
                 .id("acc")
@@ -1343,9 +1349,9 @@ impl ThinSttView {
                     .justify_center()
                     .size(px(38.))
                     .rounded(px(10.))
-                    .bg(rgba(0x7b74ff26))
+                    .bg(rgba(0xffffff0f))
                     .border_1()
-                    .border_color(rgba(0x7b74ff55))
+                    .border_color(rgba(GLASS_EDGE))
                     .text_size(px(17.))
                     .text_color(rgb(ACCENT_HI))
                     .child("⌘"),
@@ -1400,7 +1406,7 @@ impl ThinSttView {
         let footer_left: AnyElement = match &current {
             Some(_) => button_base("Remove shortcut")
                 .text_color(rgb(DANGER))
-                .hover(|s| s.bg(rgba(0xf2555a1f)).text_color(rgb(DANGER)))
+                .hover(|s| s.bg(rgba(0xef44441f)).text_color(rgb(DANGER)))
                 .id("capture-remove")
                 .on_click(cx.listener(|v, _e, _w, cx| {
                     if let Some(id) = v.capturing_for.clone() {
@@ -1442,7 +1448,7 @@ impl ThinSttView {
             )
             .when(can_save, |d| {
                 d.bg(rgb(ACCENT))
-                    .text_color(rgb(0xffffff))
+                    .text_color(rgb(ON_ACCENT))
                     .hover(|s| s.bg(rgb(ACCENT_HI)))
                     .on_click(cx.listener(|v, _e, _w, cx| {
                         v.commit_capture();
@@ -1461,9 +1467,9 @@ impl ThinSttView {
             .w(px(468.))
             .p(px(22.))
             .rounded(px(18.))
-            .bg(rgb(SURFACE))
+            .bg(rgba(0x111113f2))
             .border_1()
-            .border_color(rgb(SURFACE3))
+            .border_color(rgba(0xffffff1f))
             .shadow_2xl()
             .on_mouse_down_out(cx.listener(|v, _e, _w, cx| {
                 v.cancel_capture();
@@ -1681,7 +1687,7 @@ fn step_row(
         .rounded_full()
         .text_size(px(12.))
         .font_weight(FontWeight::BOLD)
-        .when(done, |d| d.bg(rgb(GREEN)).text_color(rgb(0x0b2a1c)).child("✓"))
+        .when(done, |d| d.bg(rgb(FG)).text_color(rgb(ON_ACCENT)).child("✓"))
         .when(!done, |d| {
             d.border_1()
                 .border_color(rgb(if enabled { ACCENT } else { SURFACE3 }))
@@ -1727,9 +1733,9 @@ fn mode_segments(mode: &str, cx: &mut Context<ThinSttView>) -> gpui::Div {
         .items_center()
         .p(px(2.))
         .rounded(px(8.))
-        .bg(rgb(BG))
+        .bg(rgba(0x0000004d))
         .border_1()
-        .border_color(rgb(HAIRLINE));
+        .border_color(rgba(GLASS_EDGE));
     for id in ["type", "paste", "clipboard"] {
         let active = mode == id;
         segs = segs.child(
@@ -1784,6 +1790,7 @@ impl Render for ThinSttView {
             .flex_1()
             .min_w_0()
             .h_full()
+            .bg(rgba(CONTENT_TINT))
             .child(div().h(px(TITLEBAR_H - 12.)).flex_none())
             .child(
                 div()
@@ -1806,7 +1813,6 @@ impl Render for ThinSttView {
             .relative()
             .flex()
             .size_full()
-            .bg(rgb(BG))
             .text_color(rgb(FG))
             .font_family(".SystemUIFont")
             .child(self.render_sidebar(cx))

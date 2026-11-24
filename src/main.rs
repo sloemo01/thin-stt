@@ -67,6 +67,7 @@ fn main() {
         actions::fetch_remote_sizes();
         actions::sweep_recordings();
         setup_tray();
+        unsafe { dark_appearance() };
         open_main_window(cx);
 
         cx.spawn(|cx: &mut AsyncApp| {
@@ -87,6 +88,40 @@ fn main() {
     });
 }
 
+/// Liquid Glass (macOS 26 `NSGlassEffectView`) inserted under the GPUI view.
+/// `frame` is in the content view's coordinates; no-op on older macOS.
+#[allow(deprecated)]
+unsafe fn add_glass(gpui_view: cocoa::base::id, frame: cocoa::foundation::NSRect, radius: f64, mask: u64) {
+    use cocoa::base::{id, nil};
+    let Some(cls) = objc::runtime::Class::get("NSGlassEffectView") else {
+        return;
+    };
+    let parent: id = msg_send![gpui_view, superview];
+    if parent == nil {
+        return;
+    }
+    let glass: id = msg_send![cls, alloc];
+    let glass: id = msg_send![glass, initWithFrame: frame];
+    let _: () = msg_send![glass, setCornerRadius: radius];
+    let _: () = msg_send![glass, setAutoresizingMask: mask];
+    let tint: id = msg_send![objc::class!(NSColor), colorWithSRGBRed: 0.03f64 green: 0.03f64 blue: 0.04f64 alpha: 0.35f64];
+    let _: () = msg_send![glass, setTintColor: tint];
+    // NSWindowBelow = -1
+    let _: () = msg_send![parent, addSubview: glass positioned: -1isize relativeTo: gpui_view];
+}
+
+#[allow(deprecated)]
+/// Force dark Aqua app-wide so the window blur and glass use their dark
+/// variants. Must run before any window exists: changing a live window's
+/// appearance re-enters GPUI while it is borrowed.
+unsafe fn dark_appearance() {
+    use cocoa::foundation::NSString;
+    let name = NSString::alloc(cocoa::base::nil).init_str("NSAppearanceNameDarkAqua");
+    let look: cocoa::base::id = msg_send![objc::class!(NSAppearance), appearanceNamed: name];
+    let app: cocoa::base::id = msg_send![objc::class!(NSApplication), sharedApplication];
+    let _: () = msg_send![app, setAppearance: look];
+}
+
 fn open_main_window(cx: &mut App) {
     let bounds = Bounds::centered(None, size(px(920.0), px(660.0)), cx);
     let handle = cx
@@ -96,7 +131,7 @@ fn open_main_window(cx: &mut App) {
                 titlebar: Some(TitlebarOptions {
                     title: Some("Thin STT".into()),
                     appears_transparent: true,
-                    traffic_light_position: Some(point(px(18.0), px(18.0))),
+                    traffic_light_position: Some(point(px(20.0), px(18.0))),
                 }),
                 focus: true,
                 show: true,
@@ -105,7 +140,7 @@ fn open_main_window(cx: &mut App) {
                 is_resizable: true,
                 is_minimizable: true,
                 display_id: None,
-                window_background: WindowBackgroundAppearance::Opaque,
+                window_background: WindowBackgroundAppearance::Blurred,
                 app_id: None,
                 window_min_size: Some(size(px(780.0), px(540.0))),
                 window_decorations: None,
@@ -114,6 +149,32 @@ fn open_main_window(cx: &mut App) {
             |window, cx| cx.new(|cx| ThinSttView::new(window, cx)),
         )
         .expect("open main window");
+    // Grab the NSView, then touch AppKit outside the GPUI borrow: appearance
+    // and subview changes call back into GPUI synchronously.
+    let view_ptr = handle
+        .update(cx, |_v, window, _cx| {
+            match raw_window_handle::HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
+                Ok(raw_window_handle::RawWindowHandle::AppKit(kit)) => kit.ns_view.as_ptr() as usize,
+                _ => 0,
+            }
+        })
+        .unwrap_or(0);
+    if view_ptr != 0 {
+        unsafe {
+            #[allow(deprecated)]
+            let view = view_ptr as cocoa::base::id;
+            // Glass sidebar: the full sidebar column, flush with the window
+            // edges (the window's rounded mask clips its corners).
+            let parent: cocoa::base::id = msg_send![view, superview];
+            let bounds: cocoa::foundation::NSRect = msg_send![parent, bounds];
+            let frame = cocoa::foundation::NSRect::new(
+                cocoa::foundation::NSPoint::new(0.0, 0.0),
+                cocoa::foundation::NSSize::new(ui::SIDEBAR_WIDTH as f64, bounds.size.height),
+            );
+            // NSViewHeightSizable(16) | NSViewMaxXMargin(4)
+            add_glass(view, frame, 0.0, 16 | 4);
+        }
+    }
 
     // Let the close button actually destroy the window: the app lives on in
     // the tray, and the GPU surfaces + Metal state get freed instead of kept.
@@ -179,6 +240,23 @@ fn show_overlay(
     )
     .ok();
     if let Some(h) = opened {
+        let vp = h.update(cx, |_v, window, _cx| {
+            match raw_window_handle::HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
+                Ok(raw_window_handle::RawWindowHandle::AppKit(kit)) => kit.ns_view.as_ptr() as usize,
+                _ => 0,
+            }
+        });
+        if let Some(vp) = vp.ok().filter(|v| *v != 0) {
+            unsafe {
+                #[allow(deprecated)]
+                let view = vp as cocoa::base::id;
+                let frame = cocoa::foundation::NSRect::new(
+                    cocoa::foundation::NSPoint::new(0.0, 0.0),
+                    cocoa::foundation::NSSize::new(OVERLAY_W as f64, OVERLAY_H as f64),
+                );
+                add_glass(view, frame, OVERLAY_H as f64 / 2.0, 2 | 16);
+            }
+        }
         let _ = h.update(cx, |_v, window, _cx| {
             // Kill the NSPanel's drop shadow — it renders as a dark box
             // behind the transparent pill window.
