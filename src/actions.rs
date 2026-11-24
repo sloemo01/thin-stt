@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{config, models, state};
 
@@ -44,54 +44,82 @@ pub fn start_download(model_id: &str) {
     std::thread::spawn(move || {
         let id = model_id;
         let result = download_all(info, &cancel);
-        state::state().downloads.lock().unwrap().remove(&id);
+        {
+            // Cancel already dropped our entry; never remove a newer retry's.
+            let mut d = state::state().downloads.lock().unwrap();
+            if d.get(&id).map_or(false, |c| Arc::ptr_eq(c, &cancel)) {
+                d.remove(&id);
+            }
+        }
         match result {
-            Ok(()) => {
-                state::status(format!("{} ready", info.label));
-            }
-            Err(e) => {
-                state::status_err(format!("{} download failed: {}", info.label, e));
-            }
+            Ok(()) => state::status(format!("{} ready", info.label)),
+            Err(_) if cancel.load(Ordering::SeqCst) => {}
+            Err(e) => state::status_err(format!("{} download failed: {}", info.label, e)),
         }
         state::emit(state::UiEvent::StateChanged);
     });
+}
+
+/// Downloads must fail fast on a dead connection instead of hanging at
+/// "Starting…": connect, headers and each socket read are all bounded.
+fn download_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .timeout_per_read(Some(Duration::from_secs(30)))
+        .build()
+        .new_agent()
 }
 
 fn download_all(info: &'static models::ModelInfo, cancel: &Arc<AtomicBool>) -> Result<(), String> {
     let dir = models::model_dir(info.id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    // total bytes across all files (HEAD each, in parallel)
-    let total: u64 = std::thread::scope(|sc| {
-        let heads: Vec<_> = info
-            .files
-            .iter()
-            .map(|(remote, _)| {
-                let url = models::download_url(info, remote);
-                sc.spawn(move || {
-                    ureq::head(&url).call().ok().and_then(|resp| {
-                        resp.headers()
-                            .get("content-length")
-                            .and_then(|v| v.to_str().ok())
-                            .and_then(|s| s.parse::<u64>().ok())
-                    })
-                })
-            })
-            .collect();
-        heads.into_iter().filter_map(|h| h.join().ok().flatten()).sum()
-    });
+    // Sizes are only for the progress bar: look them up beside the
+    // download instead of making the first byte wait on them.
+    let total = Arc::new(AtomicU64::new(0));
+    {
+        let total = total.clone();
+        std::thread::spawn(move || {
+            let agent = ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(15)))
+                .build()
+                .new_agent();
+            std::thread::scope(|sc| {
+                for (remote, _) in info.files {
+                    let (agent, total) = (&agent, &total);
+                    sc.spawn(move || {
+                        let len = agent
+                            .head(&models::download_url(info, remote))
+                            .call()
+                            .ok()
+                            .and_then(|r| r.headers().get("content-length")?.to_str().ok()?.parse::<u64>().ok());
+                        if let Some(n) = len {
+                            total.fetch_add(n, Ordering::Relaxed);
+                        }
+                    });
+                }
+            });
+        });
+    }
+    let agent = download_agent();
+    let nonce = std::process::id() as u128 * 1_000_000_000
+        + std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
 
     let mut done: u64 = 0;
     let mut last_emit = Instant::now();
     for (remote, local) in info.files {
         if cancel.load(Ordering::SeqCst) {
-            cleanup(&dir);
             return Err("cancelled".into());
         }
         let url = models::download_url(info, remote);
         let dest = dir.join(local);
-        let part = dir.join(format!("{}.part", local));
-        let mut resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+        if let Ok(m) = std::fs::metadata(&dest) {
+            done += m.len();
+            continue;
+        }
+        let part = dir.join(format!("{}.{:x}.part", local, nonce));
+        let mut resp = agent.get(&url).call().map_err(|e| e.to_string())?;
         let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
         let mut reader = resp.body_mut().as_reader();
         let mut buf = [0u8; 256 * 1024];
@@ -108,7 +136,6 @@ fn download_all(info: &'static models::ModelInfo, cancel: &Arc<AtomicBool>) -> R
             done += n as u64;
             if cancel.load(Ordering::SeqCst) {
                 let _ = std::fs::remove_file(&part);
-                cleanup(&dir);
                 return Err("cancelled".into());
             }
             if last_emit.elapsed().as_millis() > 80 {
@@ -116,18 +143,14 @@ fn download_all(info: &'static models::ModelInfo, cancel: &Arc<AtomicBool>) -> R
                 state::emit(state::UiEvent::DownloadProgress {
                     id: info.id.to_string(),
                     done,
-                    total,
+                    total: total.load(Ordering::Relaxed),
                 });
             }
         }
         drop(file);
         std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
     }
-    state::emit(state::UiEvent::DownloadProgress {
-        id: info.id.to_string(),
-        done: total,
-        total,
-    });
+    state::emit(state::UiEvent::DownloadProgress { id: info.id.to_string(), done, total: done });
     Ok(())
 }
 

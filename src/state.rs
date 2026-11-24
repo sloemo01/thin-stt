@@ -144,7 +144,12 @@ pub fn flags_changed(ns_flags: u64) {
 
 pub fn cancel_download(model_id: &str) {
     let s = state();
-    if let Some(flag) = s.downloads.lock().unwrap().get(model_id) {
+    // Drop the entry now so the row flips back at once, even if the worker
+    // is still stuck in a slow read; it stops at its next check.
+    let flag = s.downloads.lock().unwrap().remove(model_id);
+    if let Some(flag) = flag {
         flag.store(true, Ordering::SeqCst);
+        status("Download cancelled");
+        emit(UiEvent::StateChanged);
     }
 }
