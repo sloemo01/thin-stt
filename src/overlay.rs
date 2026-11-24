@@ -124,7 +124,7 @@ fn bar(h: f32, alpha: f32) -> gpui::Div {
 
 impl Render for OverlayView {
     fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        if self.cam {
+        if self.cam && self.live {
             self.refresh_frame(window);
         }
         let mut wave = div().flex().items_center().justify_center().gap(px(4.)).h(px(WAVE_H));
