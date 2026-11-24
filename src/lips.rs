@@ -12,11 +12,12 @@ use crate::models;
 pub const CROP: usize = 88;
 pub const FAST_MODEL_ID: &str = "lips-fast";
 pub const FLARE_MODEL_ID: &str = "lips-flare";
+pub const FLARE_LLM_MODEL_ID: &str = "lips-flare-llm";
 pub const MIN_FRAMES: usize = 10;
 
 /// Most accurate lip model on disk.
 pub fn best_model() -> Option<&'static models::ModelInfo> {
-    [FLARE_MODEL_ID, FAST_MODEL_ID]
+    [FLARE_LLM_MODEL_ID, FLARE_MODEL_ID, FAST_MODEL_ID]
         .iter()
         .filter_map(|id| models::by_id(id))
         .find(|m| models::is_downloaded(m))
@@ -263,6 +264,9 @@ pub fn transcribe(model_id: &str, clip: &Clip) -> Result<String, String> {
     if info.id == FLARE_MODEL_ID {
         return flare(&dir, clip);
     }
+    if info.id == FLARE_LLM_MODEL_ID {
+        return flare_llm(&dir, clip);
+    }
     let crops = &clip.lips;
     let tokens: Vec<String> = serde_json::from_str(
         &std::fs::read_to_string(dir.join("tokens.json")).map_err(|e| e.to_string())?,
@@ -322,13 +326,12 @@ const ENC_DIM: usize = 768;
 
 /// FLARE Large: joint face + lip encoder, then a beam search over the
 /// lightweight Transformer decoder. Each session lives only for its stage.
-fn flare(dir: &std::path::Path, clip: &Clip) -> Result<String, String> {
+/// FLARE Large's joint face + lip encoder: `[t, ENC_DIM]` features.
+fn flare_encode(dir: &std::path::Path, clip: &Clip) -> Result<(Vec<f32>, usize), String> {
     use ort::value::Tensor;
-    let dict = std::fs::read_to_string(dir.join("flare_dict.txt")).map_err(|e| e.to_string())?;
-    let words: Vec<&str> = dict.lines().filter_map(|l| l.split_whitespace().next()).collect();
     let t = clip.frames().min(MAX_FRAMES);
     if t == 0 {
-        return Ok(String::new());
+        return Ok((Vec::new(), 0));
     }
     let pixels = |b: &[u8]| -> Vec<f32> { b[..t * CROP_PIXELS].iter().map(|&p| p as f32 / 255.0).collect() };
     let has_face = clip.face.len() >= t * CROP_PIXELS;
@@ -345,6 +348,42 @@ fn flare(dir: &std::path::Path, clip: &Clip) -> Result<String, String> {
             .map_err(|e| e.to_string())?;
         out["enc"].try_extract_tensor::<f32>().map_err(|e| e.to_string())?.1.to_vec()
     };
+    Ok((enc, t))
+}
+
+/// FLARE-LLM: FLARE Large's encoder, the modality projection, then
+/// Qwen2.5-7B + LoRA. Each stage frees its model before the next loads.
+fn flare_llm(dir: &std::path::Path, clip: &Clip) -> Result<String, String> {
+    use ort::value::Tensor;
+    let (enc, t) = flare_encode(dir, clip)?;
+    if t == 0 {
+        return Ok(String::new());
+    }
+    let (emb, dim) = {
+        let mut s = session(&dir.join("flare_proj.int8.onnx"))?;
+        let out = s
+            .run(ort::inputs!["enc" => Tensor::from_array(([1usize, t, ENC_DIM], enc)).map_err(|e| e.to_string())?])
+            .map_err(|e| e.to_string())?;
+        let (shape, emb) = out["emb"].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
+        (emb.to_vec(), *shape.last().ok_or("bad projection")? as usize)
+    };
+    let text = crate::lipllm::transcribe(
+        &dir.join("qwen2.5-7b.i1-Q4_K_M.gguf"),
+        &dir.join("flare_llm_lora.f16.gguf"),
+        &emb,
+        dim,
+    )?;
+    Ok(sentence_case(&text))
+}
+
+fn flare(dir: &std::path::Path, clip: &Clip) -> Result<String, String> {
+    use ort::value::Tensor;
+    let dict = std::fs::read_to_string(dir.join("flare_dict.txt")).map_err(|e| e.to_string())?;
+    let words: Vec<&str> = dict.lines().filter_map(|l| l.split_whitespace().next()).collect();
+    let (enc, t) = flare_encode(dir, clip)?;
+    if t == 0 {
+        return Ok(String::new());
+    }
     let mut dec = session(&dir.join("flare_dec.int8.onnx"))?;
     let mut alive: Vec<(Vec<i64>, f32)> = vec![(vec![FLARE_EOS], 0.0)];
     let mut done: Vec<(Vec<i64>, f32)> = Vec::new();
