@@ -11,7 +11,7 @@ pub enum UiEvent {
     /// Status line for the main window.
     Status { text: String, error: bool },
     /// Show/update the floating overlay pill.
-    Overlay { text: String, color: u32 },
+    Overlay { title: String, detail: String, color: u32, live: bool },
     /// Hide the overlay.
     OverlayHide,
     /// Download progress for one model (bytes done/total).

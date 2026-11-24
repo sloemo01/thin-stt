@@ -22,8 +22,10 @@ use overlay::OverlayView;
 use state::{state, UiEvent};
 use ui::ThinSttView;
 
-const OVERLAY_GREEN: u32 = 0x1f8a4c;
-const OVERLAY_YELLOW: u32 = 0xb58900;
+const OVERLAY_RECORDING: u32 = 0xff5a5f;
+const OVERLAY_BUSY: u32 = 0xf0b54a;
+const OVERLAY_W: f32 = 300.0;
+const OVERLAY_H: f32 = 52.0;
 
 fn main() {
     tune_allocator();
@@ -76,23 +78,25 @@ fn main() {
         if std::env::args().any(|a| a == "--demo") {
             // Show the overlay briefly so it can be checked visually.
             state::emit(UiEvent::Overlay {
-                text: "● Recording — Whisper Tiny".into(),
-                color: OVERLAY_GREEN,
+                title: "Listening".into(),
+                detail: "Whisper Tiny · release to insert".into(),
+                color: OVERLAY_RECORDING,
+                live: true,
             });
         }
     });
 }
 
 fn open_main_window(cx: &mut App) {
-    let bounds = Bounds::centered(None, size(px(760.0), px(640.0)), cx);
+    let bounds = Bounds::centered(None, size(px(920.0), px(660.0)), cx);
     let handle = cx
         .open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Thin STT".into()),
-                    appears_transparent: false,
-                    traffic_light_position: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(18.0), px(18.0))),
                 }),
                 focus: true,
                 show: true,
@@ -103,7 +107,7 @@ fn open_main_window(cx: &mut App) {
                 display_id: None,
                 window_background: WindowBackgroundAppearance::Opaque,
                 app_id: None,
-                window_min_size: None,
+                window_min_size: Some(size(px(780.0), px(540.0))),
                 window_decorations: None,
                 tabbing_identifier: None,
             },
@@ -117,7 +121,7 @@ fn open_main_window(cx: &mut App) {
 }
 
 fn overlay_position(cx: &App) -> Point<Pixels> {
-    let w = px(360.0);
+    let w = px(OVERLAY_W);
     if let Some(d) = cx.primary_display() {
         let b = d.bounds();
         let x = b.origin.x + (b.size.width - w) / 2.0;
@@ -131,14 +135,18 @@ fn overlay_position(cx: &App) -> Point<Pixels> {
 fn show_overlay(
     cx: &mut App,
     existing: Option<WindowHandle<OverlayView>>,
-    text: String,
+    title: String,
+    detail: String,
     color: u32,
+    live: bool,
 ) -> Option<WindowHandle<OverlayView>> {
     if let Some(h) = existing {
         let ok = h
             .update(cx, |v, _w, cx| {
-                v.text = text.clone().into();
+                v.title = title.clone().into();
+                v.detail = detail.clone().into();
                 v.color = color;
+                v.live = live;
                 cx.notify();
             })
             .is_ok();
@@ -151,7 +159,7 @@ fn show_overlay(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: pos,
-                size: size(px(360.0), px(52.0)),
+                size: size(px(OVERLAY_W), px(OVERLAY_H)),
             })),
             titlebar: None,
             focus: false,
@@ -167,7 +175,7 @@ fn show_overlay(
             window_decorations: None,
             tabbing_identifier: None,
         },
-        |_window, cx| cx.new(|_| OverlayView::new(text.clone(), color)),
+        |_window, cx| cx.new(|_| OverlayView::new(title.clone(), detail.clone(), color, live)),
     )
     .ok();
     if let Some(h) = opened {
@@ -248,8 +256,10 @@ fn hotkey_pressed(id: u32, recorder: &mut Option<audio::Recorder>) {
         Ok(r) => {
             *recorder = Some(r);
             state::emit(UiEvent::Overlay {
-                text: format!("● Recording — {}", info.label),
-                color: OVERLAY_GREEN,
+                title: "Listening".into(),
+                detail: format!("{} · release to insert", info.label),
+                color: OVERLAY_RECORDING,
+                live: true,
             });
             state::status(format!("Hold hotkey… release to transcribe ({})", info.label));
         }
@@ -275,8 +285,10 @@ fn hotkey_released(id: u32, recorder: &mut Option<audio::Recorder>) {
         .clone()
         .unwrap_or_else(|| "type".into());
     state::emit(UiEvent::Overlay {
-        text: "Transcribing…".into(),
-        color: OVERLAY_YELLOW,
+        title: "Transcribing".into(),
+        detail: models::by_id(&model_id).map(|m| m.label).unwrap_or("").into(),
+        color: OVERLAY_BUSY,
+        live: false,
     });
 
     // stop() pauses the CoreAudio stream — the Recorder is !Send, so it
@@ -370,8 +382,10 @@ fn maybe_polish(text: String) -> String {
         return text;
     };
     state::emit(UiEvent::Overlay {
-        text: "Polishing…".into(),
-        color: OVERLAY_YELLOW,
+        title: "Polishing".into(),
+        detail: "Qwen3 cleanup pass".into(),
+        color: OVERLAY_BUSY,
+        live: false,
     });
     match llm::polish(&path, &text) {
         Ok(cleaned) if !cleaned.is_empty() => cleaned,
@@ -473,9 +487,9 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
         }
         while let Ok(ev) = rx.try_recv() {
             match ev {
-                UiEvent::Overlay { text, color } => {
+                UiEvent::Overlay { title, detail, color, live } => {
                     let _ = cx.update(|cx| {
-                        overlay = show_overlay(cx, overlay.take(), text, color);
+                        overlay = show_overlay(cx, overlay.take(), title, detail, color, live);
                     });
                 }
                 UiEvent::OverlayHide => {
@@ -504,6 +518,18 @@ async fn pump(rx: Receiver<UiEvent>, cx: AsyncApp) {
                     let _ = cx.update(|cx| cx.quit());
                 }
             }
+        }
+        // Live mic meter for the overlay while the hotkey is held.
+        if let (Some(rec), Some(h)) = (recorder.as_ref(), overlay.as_ref()) {
+            let level = rec.level();
+            let _ = cx.update(|cx| {
+                let _ = h.update(cx, |v, _w, cx| {
+                    if v.live {
+                        v.push_level(level);
+                        cx.notify();
+                    }
+                });
+            });
         }
         // Idle memory sweep: while nothing is recording, hand cached
         // allocator pages back to the OS roughly every 15s.

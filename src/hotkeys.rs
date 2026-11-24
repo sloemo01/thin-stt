@@ -51,6 +51,39 @@ pub fn parse(spec: &str) -> Option<Trigger> {
     }
 }
 
+/// Canonical short form ("ctrl+alt+9", mods in fixed order) for comparing
+/// specs. None if a key is unsupported or more than one key is present.
+pub fn canonical(spec: &str) -> Option<String> {
+    let mut bits = 0u8;
+    let mut key: Option<String> = None;
+    for tok in spec.split('+').filter(|t| !t.is_empty()) {
+        match normalize(tok).as_str() {
+            "ctrl" => bits |= BIT_CTRL,
+            "alt" => bits |= BIT_ALT,
+            "shift" => bits |= BIT_SHIFT,
+            "cmd" => bits |= BIT_CMD,
+            k => {
+                if key.is_some() || code_for(k).is_none() {
+                    return None;
+                }
+                key = Some(k.to_string());
+            }
+        }
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for (b, n) in [(BIT_CTRL, "ctrl"), (BIT_ALT, "alt"), (BIT_SHIFT, "shift"), (BIT_CMD, "cmd")] {
+        if bits & b != 0 {
+            parts.push(n.into());
+        }
+    }
+    parts.extend(key);
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("+"))
+    }
+}
+
 /// Normalize one token to the short form: modifiers -> ctrl/alt/shift/cmd,
 /// "Digit9"->"9", "KeyA"->"a", "ArrowUp"->"up".
 fn normalize(tok: &str) -> String {
