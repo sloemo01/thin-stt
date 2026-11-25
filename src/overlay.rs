@@ -20,7 +20,7 @@ const CAM_R: f32 = 14.;
 /// The glass bubble sits inside a slightly larger transparent window.
 pub const BUBBLE_W: f32 = 240.;
 pub const BUBBLE_H: f32 = 60.;
-pub const BUBBLE_CAM_H: f32 = 180.;
+pub const BUBBLE_CAM_H: f32 = 184.;
 pub const MARGIN_X: f32 = 12.;
 pub const MARGIN_TOP: f32 = 12.;
 pub const MARGIN_BOTTOM: f32 = 12.;
@@ -246,6 +246,7 @@ impl Render for OverlayView {
                 .flex()
                 .items_center()
                 .gap(px(5.))
+                .line_height(px(14.))
                 .child(
                     div().size(px(5.)).rounded_full().bg(rgb(self.color)).with_animation(
                         "pulse",
