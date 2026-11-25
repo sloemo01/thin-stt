@@ -2049,10 +2049,11 @@ impl ThinSttView {
         let headline = match &spec {
             Some(spec) => div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap(px(12.))
                 .child(div().text_size(px(15.)).text_color(rgb(MUTED)).child("Hold"))
-                .child(keycaps(spec, true))
+                .child(keycaps(spec, true).max_w_full().flex_wrap())
                 .child(div().text_size(px(15.)).text_color(rgb(MUTED)).child("and mouth your words")),
             None => div()
                 .text_size(px(18.))
@@ -2064,6 +2065,7 @@ impl ThinSttView {
             .flex()
             .flex_col()
             .flex_1()
+            .flex_basis(px(280.))
             .min_w_0()
             .gap(px(14.))
             .child(
@@ -2083,6 +2085,7 @@ impl ThinSttView {
             .child(headline)
             .child(
                 div()
+                    .w_full()
                     .text_size(px(13.))
                     .text_color(rgb(MUTED))
                     .child("No microphone and no audio. Only small grayscale mouth crops are kept in memory, decoded on this Mac, then dropped."),
@@ -2100,6 +2103,7 @@ impl ThinSttView {
             .child(div().flex().child(toggle_preview));
         let hero = div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(px(24.))
             .rounded(px(16.))
