@@ -9,22 +9,23 @@ use gpui::{
 /// Level history; the waveform mirrors it outward from the centre bar.
 pub const LEVEL_BARS: usize = 11;
 const WAVE_BARS: usize = LEVEL_BARS * 2 - 1;
-const WAVE_H: f32 = 52.;
-const BAR_W: f32 = 6.;
-const BAR_MIN: f32 = 6.;
+const WAVE_H: f32 = 26.;
+const BAR_W: f32 = 3.;
+const BAR_MIN: f32 = 3.;
 const SHIMMER_MS: u64 = 1400;
-const CAM_H: f32 = 196.;
-const CAM_R: f32 = 24.;
+const CAM_H: f32 = 108.;
+const CAM_PAD: f32 = 8.;
+const CAM_R: f32 = 14.;
 
 /// The glass bubble sits inside a slightly larger transparent window.
-pub const BUBBLE_W: f32 = 420.;
-pub const BUBBLE_H: f32 = 116.;
-pub const BUBBLE_CAM_H: f32 = 330.;
+pub const BUBBLE_W: f32 = 240.;
+pub const BUBBLE_H: f32 = 60.;
+pub const BUBBLE_CAM_H: f32 = 180.;
 pub const MARGIN_X: f32 = 12.;
 pub const MARGIN_TOP: f32 = 12.;
 pub const MARGIN_BOTTOM: f32 = 12.;
 pub fn bubble_radius(cam: bool) -> f32 {
-    if cam { 34. } else { BUBBLE_H / 2. }
+    if cam { 22. } else { BUBBLE_H / 2. }
 }
 
 /// Siri-style light: magenta, violet, blue, cyan, amber.
@@ -83,7 +84,7 @@ impl OverlayView {
         // Crop to the tile's aspect so the image fills it exactly; with Cover
         // the overflow would be clipped square and hide the rounded corners.
         let (w, h) = img.dimensions();
-        let want = (BUBBLE_W - 24.) / CAM_H;
+        let want = (BUBBLE_W - 2. * CAM_PAD) / CAM_H;
         let (cw, ch) = if w as f32 / h as f32 > want {
             (((h as f32 * want) as u32).max(1), h)
         } else {
@@ -121,18 +122,18 @@ impl OverlayView {
             .child(
                 div()
                     .absolute()
-                    .left(px(8.))
-                    .top(px(8.))
+                    .left(px(6.))
+                    .top(px(6.))
                     .flex()
                     .items_center()
-                    .gap(px(5.))
-                    .px(px(8.))
-                    .py(px(3.))
+                    .gap(px(4.))
+                    .px(px(6.))
+                    .py(px(2.))
                     .rounded_full()
                     .bg(rgba(0x000000b3))
-                    .text_size(px(10.))
+                    .text_size(px(9.))
                     .font_weight(FontWeight::MEDIUM)
-                    .child(div().size(px(6.)).rounded_full().bg(rgb(dot)))
+                    .child(div().size(px(5.)).rounded_full().bg(rgb(dot)))
                     .child(label),
             )
     }
@@ -170,7 +171,7 @@ impl Render for OverlayView {
         if self.cam && self.live {
             self.refresh_frame(window);
         }
-        let mut wave = div().flex().items_center().justify_center().gap(px(5.)).h(px(WAVE_H));
+        let mut wave = div().flex().items_center().justify_center().gap(px(3.)).h(px(WAVE_H));
         if self.live {
             for i in 0..WAVE_BARS {
                 let pos = i as f32 / (WAVE_BARS - 1) as f32;
@@ -186,7 +187,7 @@ impl Render for OverlayView {
             // Transcribing: a bright crest sweeps across a resting wave.
             for i in 0..WAVE_BARS {
                 let pos = i as f32 / (WAVE_BARS - 1) as f32;
-                let rest = BAR_MIN + 6. * envelope(i);
+                let rest = BAR_MIN + 3. * envelope(i);
                 let c = siri(pos);
                 wave = wave.child(
                     bar(rest, 0.3, pos).with_animation(
@@ -197,7 +198,7 @@ impl Render for OverlayView {
                             let crest = (1.0 - x / 0.22).max(0.0);
                             let crest = crest * crest * (3.0 - 2.0 * crest);
                             let a = 0.3 + 0.7 * crest;
-                            d.h(px(rest + 24. * crest * envelope(i)))
+                            d.h(px(rest + 12. * crest * envelope(i)))
                                 .bg(gpui::linear_gradient(
                                     180.,
                                     gpui::linear_color_stop(gpui::Hsla { h: 0., s: 0., l: 1., a }, 0.1),
@@ -234,19 +235,19 @@ impl Render for OverlayView {
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(8.))
+            .gap(px(4.))
             .text_color(rgb(0xfafafa))
             .font_family(".SystemUIFont")
-            .when(self.cam, |d| d.p(px(12.)).pb(px(16.)).justify_end())
+            .when(self.cam, |d| d.p(px(CAM_PAD)).pb(px(9.)).justify_end())
             .when(!self.cam, |d| d.justify_center());
         let bubble = if self.cam { bubble.child(self.camera_view()).child(div().flex_1()) } else { bubble };
         let bubble = bubble.child(wave).child(
             div()
                 .flex()
                 .items_center()
-                .gap(px(7.))
+                .gap(px(5.))
                 .child(
-                    div().size(px(6.)).rounded_full().bg(rgb(self.color)).with_animation(
+                    div().size(px(5.)).rounded_full().bg(rgb(self.color)).with_animation(
                         "pulse",
                         Animation::new(Duration::from_millis(1200))
                             .repeat()
@@ -254,8 +255,8 @@ impl Render for OverlayView {
                         |d, t| d.opacity(t),
                     ),
                 )
-                .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(model))
-                .child(div().text_size(px(12.)).text_color(rgb(0xa1a1aa)).child(self.title.clone())),
+                .child(div().text_size(px(11.)).font_weight(FontWeight::SEMIBOLD).child(model))
+                .child(div().text_size(px(10.)).text_color(rgb(0xa1a1aa)).child(self.title.clone())),
         );
         div().relative().size_full().child(bubble)
     }
